@@ -86,7 +86,7 @@ class Interface:
     protocol : int
     interface_string : int | str
 
-     def set_string(self, index, value):
+    def set_string(self, index, value):
         if self.interface_string == index:
             self.interface_string = value
             return True
@@ -105,18 +105,18 @@ class Configuration:
     ATTRIB_REMOTE_WAKEUP = 0x20
 
     def set_string(self, index, value):
+        found = False
         if self.configuration_string == index:
             self.configuration_string = value
-            return True
-        else:
-            try:
-                self.interfaces
-            except AttributeError:
-                return False
-            for interface in self.interfaces:
-                if interface.set_string(index, value):
-                    return True
-        return False
+            found = True
+        try:
+            self.interfaces
+        except AttributeError:
+            return found
+        for interface in self.interfaces:
+            if interface.set_string(index, value):
+                found = True
+        return found
 
     def add_interface(self, interface):
         try: # create the interfaces list if it doens't already exist
@@ -164,24 +164,24 @@ class Device:
         self.configurations.append(configuration)
 
     def set_string(self, index, value):
+        found = False
         if self.manufacturer_string == index:
             self.manufacturer_string = value
-            return True
+            found = True
         elif self.product_string == index:
             self.product_string = value
-            return True
+            found = True
         elif self.serial_number_string == index:
             self.serial_number_string = value
-            return True
-        else:
-            try:
-                self.configurations
-            except AttributeError:
-                return False
-            for config in self.configurations:
-                if config.set_string(index, value):
-                    return True
-        return False
+            found = True
+        try:
+            self.configurations
+        except AttributeError:
+            return found
+        for config in self.configurations:
+            if config.set_string(index, value):
+                found = True
+        return found
 
     def __eq__(self, other):
         # I don't know the official way to compare devices, and the serial number isn't guaranteed to be known yet
@@ -459,7 +459,7 @@ class URB:
         return "Response Interpretation Unimplemented"
 
     def add_new_device(new_dev, new_dev_map):
-        devices.append(device)
+        devices.append(new_dev)
         devmap[new_dev_map] = devices[-1]
 
     def decode(self):
@@ -479,7 +479,7 @@ class URB:
                                 else:
                                     URB.add_new_device(new_dev, new_dev_map)
                                     return f"Replacement in {new_dev_map.bus}.{new_dev_map.device}: {new_dev}"
-                                URB.add_new_device(new_dev, new_dev_map)
+                            URB.add_new_device(new_dev, new_dev_map)
                             return str(new_dev)
                         case self.DESC_TYPE_CONFIGURATION:
                             total_length, num_interfaces, configuration_id, configuration_string, attributes, max_power = desc_config.unpack(self.data[desc_start.size:desc_start.size+desc_config.size])
@@ -536,6 +536,18 @@ def decode(infile):
             print(block)
             break
 
+def usage():
+    print(f"USAGE: {sys.argv[0]} <pcapng-file>\n\n" \
+           "Decode HID traffic captured in to pcapng-file.\n" \
+           "This is and will only ever be very barebones and only decode that\n" \
+           "which is necessary for me to reverse engineer a HID communication\n" \
+           "between the Windows software and keyboard.  This will probably never\n" \
+           "be able to decode any arbitrary USB communication or even HID\n" \
+           "communications.\n")
+
 if __name__ == '__main__':
-    with open(sys.argv[1], 'rb') as infile:
-        decode(infile)
+    if len(sys.argv) < 2:
+        usage()
+    else:
+        with open(sys.argv[1], 'rb') as infile:
+            decode(infile)
