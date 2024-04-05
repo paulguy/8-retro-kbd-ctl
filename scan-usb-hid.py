@@ -17,6 +17,9 @@ desc_config = struct.Struct("HBBBBB")
 desc_interface = struct.Struct("BBBBBBB")
 desc_endpoint = struct.Struct("BBHB")
 
+# I guess python really does suck
+iface_hid = struct.Struct("<HBBBH")
+
 # not device interfaces, capture interfaces
 interfaces = []
 # any seen devices
@@ -32,7 +35,7 @@ def chrbyte(char):
 def strbcd(val):
     return hex(val)[2:]
 
-class UnknownURBException(Exception):
+class UninterpretableDataException(Exception):
     pass
 
 @dataclass
@@ -77,6 +80,86 @@ def str_hex(data):
     return ret
 
 @dataclass
+class Endpoint:
+    address : int
+    attributes : int
+    max_packet_size : int
+    interval : int
+
+    ADDRESS_MASK = 0x0F
+    ADDRESS_DIR_MASK = 0x80
+    ADDRESS_DIR_OUT = 0x00
+    ADDRESS_DIR_IN = 0x80
+
+    ATTRIB_TYPE_MASK = 0x03
+    ATTRIB_TYPE_CONTROL = 0x00
+    ATTRIB_TYPE_ISOCHRONOUS = 0x01
+    ATTRIB_TYPE_BULK = 0x02
+    ATTRIB_TYPE_INTERRUPT = 0x03
+
+    ATTRIB_ISO_SYNCH_MASK = 0x0C
+    ATTRIB_ISO_SYNCH_NO = 0x00
+    ATTRIB_ISO_SYNCH_ASYNC = 0x04
+    ATTRIB_ISO_SYNCH_ADAPTIVE = 0x08
+    ATTRIB_ISO_SYNCH_SYNC = 0x0C
+
+    ATTRIB_ISO_USAGE_MASK = 0x30
+    ATTRIB_ISO_USAGE_DATA = 0x00
+    ATTRIB_ISO_USAGE_FEEDBACK = 0x10
+    ATTRIB_ISO_USAGE_EXPLICIT = 0x20
+    ATTRIB_ISO_USAGE_RESERVED = 0x30
+
+    def __str__(self):
+        addr_num = self.address & self.ADDRESS_MASK
+        addr_dir = "Out"
+        if self.address & self.ADDRESS_DIR_MASK == self.ADDRESS_DIR_IN:
+            addr_dir = "In"
+        attrib_iso_sync = ""
+        attrib_iso_usage = ""
+        attrib_type = "Control"
+        match self.attributes & self.ATTRIB_TYPE_MASK:
+            case self.ATTRIB_TYPE_ISOCHRONOUS:
+                attrib_type = "Isochronous"
+                match self.attributes & self.ATTRIB_ISO_SYNCH_MASK:
+                    case self.ATTRIB_ISO_SYNCH_NO:
+                        attrib_iso_sync = " No-Sync"
+                    case self.ATTRIB_ISO_SYNCH_ASYNC:
+                        attrib_iso_sync = " Async"
+                    case self.ATTRIB_ISO_SYNCH_ADAPTIVE:
+                        attrib_iso_sync = " Adaptive-Sync"
+                    case self.ATTRIB_ISO_SYNCH_SYNC:
+                        attrib_iso_sync = " Sync"
+                match self.attribytes & self.ATTRIB_ISO_USAGE_MASK:
+                    case self.ATTRIB_ISO_USAGE_DATA:
+                        attrib_iso_usage = "Data-Endpoint"
+                    case self.ATTRIB_ISO_USAGE_FEEDBACK:
+                        attrib_iso_usage = "Feedback-Endpoint"
+                    case self.ATTRIB_ISO_USAGE_EXPLICIT:
+                        attrib_iso_usage = "Explicit-Feedback-Endpoint"
+                    case self.ATTRIB_ISO_USAGE_RESERVED:
+                        attrib_iso_usage = "Reserved"
+            case self.ATTRIB_TYPE_BULK:
+                attrib_type = "Bulk"
+            case self.ATTRIB_TYPE_INTERRUPT:
+                attrib_type = "Interrupt"
+        return f"Endpoint  Address: {addr_num} {addr_dir}" \
+               f" Attributes: {self.attributes} {attrib_type}{attrib_iso_sync}{attrib_iso_usage}" \
+               f" Max Packet Size: {self.max_packet_size} Interval: {self.interval}"
+
+@dataclass
+class HID:
+    hid : int
+    country_code : int
+    num_descriptor : int
+    descriptor_type : int
+    descriptor_length : int
+
+    def __str__(self):
+        return f"HID  ID: {strbcd(self.hid)} Country Code: {self.country_code}" \
+               f" Descriptors: {self.num_descriptor} Type: {self.descriptor_type}" \
+               f" Descriptor Length: {self.descriptor_length}"
+
+@dataclass
 class Interface:
     interface_id : int
     alternate_setting : int
@@ -91,6 +174,44 @@ class Interface:
             self.interface_string = value
             return True
         return False
+
+    def set_hid(self, hid : HID):
+        self.hid = hid
+
+    def add_endpoint(self, endpoint : Endpoint):
+        try: # create the endpoints list if it doens't already exist
+            self.endpoints
+        except AttributeError:
+            self.endpoints = []
+        self.endpoints.append(endpoint)
+
+    def __str__(self):
+        ret = f"Interface  ID: {self.interface_id} Alternate Setting: {self.alternate_setting}" \
+              f" Endpoints: {self.num_endpoints} Class: {self.interface_class}" \
+              f" Subclass: {self.subclass} Protocol: {self.protocol}"
+        if isinstance(self.interface_string, int):
+            ret += f" Interface String Index: {self.interface_string}"
+        else:
+            ret += f" Interface String: {self.interface_string}"
+        # check first to reduce calls in try blocks to not hide further errors
+        do_hid = False
+        do_endpoints = False
+        try:
+            self.hid
+            do_hid = True
+        except AttributeError:
+            pass
+        try:
+            self.endpoints
+            do_endpoints = True
+        except AttributeError:
+            pass
+        if do_hid:
+            ret += f"\n{str(self.hid)}"
+        if do_endpoints:
+            for endpoint in self.endpoints:
+                ret += f"\n{str(endpoint)}"
+        return ret
 
 @dataclass
 class Configuration:
@@ -138,6 +259,12 @@ class Configuration:
         if self.attributes & self.ATTRIB_REMOTE_WAKEUP:
             ret += f" Remote-Wakeup"
         ret += f" Max Power: {self.max_power*2}mA"
+        try:
+            self.interfaces
+        except AttributeError:
+            return ret
+        for interface in self.interfaces:
+            ret += f"\n{str(interface)}"
         return ret
 
 @dataclass
@@ -204,8 +331,13 @@ class Device:
         else:
             ret += f" Serial Number String String: \"{self.serial_number_string}\""
         ret += f" Number of Configurations: {self.num_configs}"
+        try:
+            self.configurations
+        except AttributeError:
+            return ret
+        for config in self.configurations:
+            ret += f"\n{str(config)}"
         return ret
-
 
 @dataclass
 class SetupURB:
@@ -369,6 +501,9 @@ class URB:
     DESC_TYPE_INTERFACE = 4
     DESC_TYPE_ENDPOINT = 5
 
+    INTERFACE_CLASS_HID = 3
+
+    HID_DESCRIPTOR_TYPE = 0x22
 
     def field_decode(self):
         urb_type_str = "Unknown"
@@ -432,7 +567,7 @@ class URB:
             self.xfer_flags = xfer_flags
             self.ndesc = ndesc
         else:
-            raise UnknownURBException()
+            raise UninterpretableDataException(f"Unknown transfer type {xfer_type}")
         self.data = data[urb_start.size+urb_iso.size+urb_end.size:]
 
     def __str__(self):
@@ -489,10 +624,25 @@ class URB:
                             # decode following interfaces/endpoints/HIDs
                             pos = desc_start.size + desc_config.size
                             for i in range(num_interfaces):
+                                pos += desc_start.size # don't bother decoding the lengths and types...
                                 interface_id, alternate_setting, num_endpoints, interface_class, subclass, protocol, interface_string = desc_interface.unpack(self.data[pos:pos+desc_interface.size])
                                 pos += desc_interface.size
                                 new_interface = Interface(interface_id, alternate_setting, num_endpoints, interface_class, subclass, protocol, interface_string)
-
+                                if interface_class == self.INTERFACE_CLASS_HID:
+                                    pos += desc_start.size
+                                    hid, country_code, num_descriptors, descriptor_type, descriptor_length = iface_hid.unpack(self.data[pos:pos+iface_hid.size])
+                                    pos += iface_hid.size
+                                    new_hid = HID(hid, country_code, num_descriptors, descriptor_type, descriptor_length)
+                                    new_interface.set_hid(new_hid)
+                                else:
+                                    raise UninterpretableDataException(f"Unknown interface class {interface_class}")
+                                for j in range(num_endpoints):
+                                    pos += desc_start.size
+                                    address, attributes, max_packet_size, interval = desc_endpoint.unpack(self.data[pos:pos+desc_endpoint.size])
+                                    pos += desc_endpoint.size
+                                    new_endpoint = Endpoint(address, attributes, max_packet_size, interval)
+                                    new_interface.add_endpoint(new_endpoint)
+                                new_config.add_interface(new_interface)
                             devmap[DevMap(self.busnum, self.devnum)].add_configuration(new_config)
                             return f"Configuration Response: {new_config}"
                         #case self.DESC_TYPE_STRING:
