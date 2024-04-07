@@ -34,7 +34,9 @@ def str_hex(data):
                f"  {chrbyte(data[i])}{chrbyte(data[i+1])}{chrbyte(data[i+2])}{chrbyte(data[i+3])}" \
                f"{chrbyte(data[i+4])}{chrbyte(data[i+5])}{chrbyte(data[i+6])}{chrbyte(data[i+7])}" \
                f" {chrbyte(data[i+8])}{chrbyte(data[i+9])}{chrbyte(data[i+10])}{chrbyte(data[i+11])}" \
-               f"{chrbyte(data[i+12])}{chrbyte(data[i+13])}{chrbyte(data[i+14])}{chrbyte(data[i+15])}\n"
+               f"{chrbyte(data[i+12])}{chrbyte(data[i+13])}{chrbyte(data[i+14])}{chrbyte(data[i+15])}"
+        if i+16 <= len(data):
+            ret += "\n"
     if len(data) % 16 != 0:
         ret += " "
         start = len(data) // 16 * 16
@@ -52,7 +54,6 @@ def str_hex(data):
             ret += chrbyte(data[num])
             if num % 16 == 7:
                 ret += " "
-        ret += "\n"
     return ret
 
 def get_better_string(orig, new):
@@ -91,6 +92,30 @@ class DevMap:
     bus : int
     device : int
 
+class HID:
+    hid : int
+    country_code : int
+    num_descriptor : int
+    descriptor_type : int
+    descriptor_length : int
+
+    # I guess python really does suck
+    # specify endianness to ignore alignment?
+    struct = struct.Struct("<BBHBBBH")
+
+    def decode_desc(self, data):
+        # TODO: decode HID
+        pass
+
+    def __init__(self, data):
+        length, desc, self.hid, self.country_code, self.num_descriptors, self.descriptor_type, \
+            self.descriptor_length = self.struct.unpack(data[:self.struct.size])
+
+    def __str__(self):
+        return f"HID  ID: {strbcd(self.hid)} Country Code: {self.country_code}" \
+               f" Descriptors: {self.num_descriptors} Type: {self.descriptor_type}" \
+               f" Descriptor Length: {self.descriptor_length}"
+
 class Endpoint:
     address : int
     attributes : int
@@ -122,14 +147,23 @@ class Endpoint:
     ATTRIB_ISO_USAGE_EXPLICIT = 0x20
     ATTRIB_ISO_USAGE_RESERVED = 0x30
 
+    def get_address(self):
+        return self.address & self.ADDRESS_MASK
+
+    def get_direction(self):
+        return self.address & self.ADDRESS_DIR_MASK
+
+    def interrupt(self):
+        # TODO: Interpret Interrupt/HID
+        pass
+
     def __init__(self, data):
         length, desc, self.address, self.attributes, self.max_packet_size, self.interval = \
             self.struct.unpack(data[:self.struct.size])
 
     def __str__(self):
-        addr_num = self.address & self.ADDRESS_MASK
         addr_dir = "Out"
-        if self.address & self.ADDRESS_DIR_MASK == self.ADDRESS_DIR_IN:
+        if self.get_direction() == self.ADDRESS_DIR_IN:
             addr_dir = "In"
         attrib_iso_sync = ""
         attrib_iso_usage = ""
@@ -159,33 +193,9 @@ class Endpoint:
                 attrib_type = "Bulk"
             case self.ATTRIB_TYPE_INTERRUPT:
                 attrib_type = "Interrupt"
-        return f"Endpoint  Address: {addr_num} {addr_dir}" \
+        return f"Endpoint  Address: {self.get_address()} {addr_dir}" \
                f" Attributes: {self.attributes} {attrib_type}{attrib_iso_sync}{attrib_iso_usage}" \
                f" Max Packet Size: {self.max_packet_size} Interval: {self.interval}"
-
-class HID:
-    hid : int
-    country_code : int
-    num_descriptor : int
-    descriptor_type : int
-    descriptor_length : int
-
-    # I guess python really does suck
-    # specify endianness to ignore alignment?
-    struct = struct.Struct("<BBHBBBH")
-
-    def decode(self, data):
-        # TODO: Decide HID
-        pass
-
-    def __init__(self, data):
-        length, desc, self.hid, self.country_code, self.num_descriptors, self.descriptor_type, \
-            self.descriptor_length = self.struct.unpack(data[:self.struct.size])
-
-    def __str__(self):
-        return f"HID  ID: {strbcd(self.hid)} Country Code: {self.country_code}" \
-               f" Descriptors: {self.num_descriptors} Type: {self.descriptor_type}" \
-               f" Descriptor Length: {self.descriptor_length}"
 
 class Interface:
     interface_id : int
@@ -212,14 +222,18 @@ class Interface:
             hidsize = HID.struct.size
         return len(self.endpoints) * Endpoint.struct.size + self.struct.size + hidsize
 
-    def decode_hid(self, data):
-        self.hid.decode(data)
+    def set_hid_report(self, data):
+        self.hid.decode_desc(data)
+
+    def interrupt(self, urb):
+        if self.interface_class == self.INTERFACE_CLASS_HID:
+            self.endpoints[urb.get_endpoint()].interrupt(urb)
 
     def __init__(self, data):
         length, desc, self.interface_id, self.alternate_setting, self.num_endpoints, \
             self.interface_class, self.subclass, self.protocol, \
             self.interface_string_id = self.struct.unpack(data[:self.struct.size])
-        self.endpoints = []
+        self.endpoints = {}
         pos = self.struct.size
         if self.interface_class == self.INTERFACE_CLASS_HID:
             self.hid = HID(data[pos:])
@@ -227,7 +241,8 @@ class Interface:
         else:
             raise UninterpretableDataException(f"Unknown interface class {self.interface_class}")
         for j in range(self.num_endpoints):
-            self.endpoints.append(Endpoint(data[pos:]))
+            endpoint = Endpoint(data[pos:])
+            self.endpoints[endpoint.get_address()] = endpoint
             pos += Endpoint.struct.size
         self.interface_string = ""
 
@@ -262,13 +277,14 @@ class Configuration:
         length, desc, self.total_length, self.num_interfaces, self.configuration_id, \
             self.configuration_string_id, self.attributes, self.max_power \
             = self.struct.unpack(data[:self.struct.size])
-        self.interfaces = []
+        self.interfaces = {}
         if len(data) >= self.total_length - URB.SIZE:
             # decode following interfaces
             pos = self.struct.size
             for i in range(self.num_interfaces):
-                self.interfaces.append(Interface(data[pos:]))
-                pos += self.interfaces[-1].get_size()
+                interface = Interface(data[pos:])
+                self.interfaces[interface.interface_id] = interface
+                pos += interface.get_size()
         self.configuration_string = ""
 
     def set_string(self, index, value):
@@ -276,15 +292,18 @@ class Configuration:
         if self.configuration_string_id == index:
             found, self.configuration_string = get_better_string(self.configuration_string, value)
 
-        for interface in self.interfaces:
-            if interface.set_string(index, value):
+        for interface in self.interfaces.keys():
+            if self.interfaces[interface].set_string(index, value):
                 found = True
         return found
 
-    def decode_hid(self, interface, data):
+    def set_hid_report(self, interface, data):
+        self.interfaces[interface].set_hid_report(data)
+
+    def interrupt(self, urb):
         for iface in self.interfaces:
             if iface.interface_id == interface:
-                iface.decode_hid(data)
+                iface.interrupt(urb)
 
     def __str__(self):
         ret = f"Configuration  Total Length: {self.total_length} Interfaces: {self.num_interfaces}" \
@@ -302,6 +321,28 @@ class Configuration:
         for interface in self.interfaces:
             ret += f"\n{str(interface)}"
         return ret
+
+class InterruptNoData:
+    def __init__(self, direction):
+        self.direction = direction
+
+    def __str__(self):
+        return f"Interrupt {self.direction} No Data"
+
+class InterruptAcknowledge:
+    def __init__(self, direction):
+        self.direction = direction
+
+    def __str__(self):
+        return f"Interrupt {self.direction} Acknowledge"
+
+class InterruptUnknown:
+    def __init__(self, direction, data):
+        self.direction = direction
+        self.data = data
+
+    def __str__(self):
+        return f"Interrupt {self.direction} Unknown\n{str_hex(self.data)}"
 
 class Device:
     busnum : int
@@ -357,8 +398,29 @@ class Device:
                 found = True
         return found
 
-    def decode_hid(self, interface, data):
-        self.configurations[self.configuration].decode_hid(interface, data)
+    def set_hid_report(self, interface, data):
+        self.configurations[self.configuration].set_hid_report(interface, data)
+
+    def interrupt(self, urb, prev):
+        if urb.direction() == URB.ENDPOINT_DIR_IN:
+            if len(urb.data) == 0:
+                if prev.xfer_type == URB.XFER_TYPE_INTERRUPT and \
+                   prev.direction() == URB.ENDPOINT_DIR_IN and \
+                   urb.urb_type == URB.URB_TYPE_SUBMIT:
+                    return InterruptAcknowledge("In")
+                else:
+                    return InterruptNoData("In")
+            return InterruptUnknown("In", urb.data)
+        else: # Out
+            if len(urb.data) == 0:
+                if prev.xfer_type == URB.XFER_TYPE_INTERRUPT and \
+                   prev.direction() == URB.ENDPOINT_DIR_OUT and \
+                   urb.urb_type == URB.URB_TYPE_COMPLETE:
+                    return InterruptAcknowledge("Out")
+                else:
+                    return InterruptNoData("Out")
+        return InterruptUnknown("Out", urb.data)
+
 
     def __eq__(self, other):
         # I don't know the official way to compare devices, and the serial number isn't guaranteed to be known yet
@@ -762,10 +824,9 @@ class URB:
                             case SetupURB.MATCH_REQUEST_GET_INTERFACE_DESCRIPTOR:
                                 match prev.extra.get_desc_value():
                                     case SetupURB.DESCRIPTOR_HID:
-                                        devmap[self.dev_map].decode_hid(prev.extra.get_desc_index(), self.data)
+                                        devmap[self.dev_map].set_hid_report(prev.extra.get_desc_index(), self.data)
             case self.XFER_TYPE_INTERRUPT:
-                if len(self.data) == 0:
-                    self.prev = prev
+                self.result = devmap[self.dev_map].interrupt(self, prev)
 
     def __str__(self):
         urb_type_str, xfer_type_str, direction, data_present, status_str = self.field_decode()
@@ -826,28 +887,7 @@ class URB:
                                         return f"{self.str_endpoint()} HID Report Response"
                 return f"{self.str_endpoint()} Unsupported Control Response"
             case self.XFER_TYPE_INTERRUPT:
-                if self.direction() == self.ENDPOINT_DIR_IN:
-                    ret = f"{self.str_endpoint()} Interrupt Packet In"
-                    if len(self.data) == 0:
-                        prev = self.prev
-                        if prev.xfer_type == self.XFER_TYPE_INTERRUPT and \
-                           prev.direction() == self.ENDPOINT_DIR_IN and \
-                           self.urb_type == self.URB_TYPE_SUBMIT:
-                            ret += " Acknowledge" 
-                        else:
-                            ret += " No Data"
-                    return ret
-                else: # Out
-                    ret = f"I{self.str_endpoint()} Interrupt Packet Out"
-                    if len(self.data) == 0:
-                        prev = self.prev
-                        if prev.xfer_type == self.XFER_TYPE_INTERRUPT and \
-                           prev.direction() == self.ENDPOINT_DIR_OUT and \
-                           self.urb_type == self.URB_TYPE_COMPLETE:
-                            ret += " Acknowledge" 
-                        else:
-                            ret += " No Data"
-                    return ret
+                return f"{self.str_endpoint()} {self.result}"
         return f"{self.str_endpoint()} Interpretation Unimplemented"
 
 def decode(infile, verbose):
