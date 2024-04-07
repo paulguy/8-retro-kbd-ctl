@@ -706,7 +706,6 @@ class URB:
         return True
 
     def __init__(self, data, prev, verbose):
-        self.prev = prev
         self.rawdata = data
         # get beginning
         self.urb_id, self.urb_type, self.xfer_type, self.epnum, self.devnum, self.busnum, \
@@ -728,7 +727,7 @@ class URB:
                     # setup request
                     self.extra = SetupURB(data[self.struct_start.size:])
                 else:
-                    prev = self.prev
+                    self.prev = prev
                     if prev.flag_setup == self.FLAG_SETUP:
                         match (prev.extra.bmRequestType, prev.extra.bRequest):
                             case SetupURB.MATCH_REQUEST_SET_CONFIGURATION:
@@ -764,6 +763,10 @@ class URB:
                                 match prev.extra.get_desc_value():
                                     case SetupURB.DESCRIPTOR_HID:
                                         devmap[self.dev_map].decode_hid(prev.extra.get_desc_index(), self.data)
+            case self.XFER_TYPE_INTERRUPT:
+                if len(self.data) == 0:
+                    self.prev = prev
+
     def __str__(self):
         urb_type_str, xfer_type_str, direction, data_present, status_str = self.field_decode()
         ret = f"URB ID: {self.urb_id:X}, URB Type: {urb_type_str}, Transfer Type: {xfer_type_str}, " \
@@ -786,13 +789,13 @@ class URB:
         if self.is_error():
             return f"{self.str_endpoint()} Error {-self.status} {errno.errorcode[-self.status]}"
 
-        prev = self.prev
         match self.xfer_type:
             case self.XFER_TYPE_CONTROL:
                 if self.flag_setup == self.FLAG_SETUP:
                     # setup request
                     return f"{self.str_endpoint()} {self.extra.decode()}"
                 else:
+                    prev = self.prev
                     if prev.flag_setup == self.FLAG_SETUP:
                         # setup response
                         match (prev.extra.bmRequestType, prev.extra.bRequest):
@@ -826,6 +829,7 @@ class URB:
                 if self.direction() == self.ENDPOINT_DIR_IN:
                     ret = f"{self.str_endpoint()} Interrupt Packet In"
                     if len(self.data) == 0:
+                        prev = self.prev
                         if prev.xfer_type == self.XFER_TYPE_INTERRUPT and \
                            prev.direction() == self.ENDPOINT_DIR_IN and \
                            self.urb_type == self.URB_TYPE_SUBMIT:
@@ -834,8 +838,9 @@ class URB:
                             ret += " No Data"
                     return ret
                 else: # Out
-                    ret = f"I{self.str_endpoint()} nterrupt Packet Out"
+                    ret = f"I{self.str_endpoint()} Interrupt Packet Out"
                     if len(self.data) == 0:
+                        prev = self.prev
                         if prev.xfer_type == self.XFER_TYPE_INTERRUPT and \
                            prev.direction() == self.ENDPOINT_DIR_OUT and \
                            self.urb_type == self.URB_TYPE_COMPLETE:
