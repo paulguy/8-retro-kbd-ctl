@@ -6,8 +6,6 @@ from dataclasses import dataclass
 import struct
 import errno
 
-desc_start = struct.Struct("BB")
-
 # not device interfaces, capture interfaces
 interfaces = []
 # any seen devices
@@ -25,16 +23,6 @@ def strbcd(val):
 
 class UninterpretableDataException(Exception):
     pass
-
-@dataclass
-class HwInterface:
-    link_type : int
-    name : str
-
-@dataclass(frozen=True)
-class DevMap:
-    bus : int
-    device : int
 
 def str_hex(data):
     ret = ""
@@ -82,13 +70,34 @@ def add_new_device(dev, dev_map):
     devices.append(dev)
     devmap[dev_map] = devices[-1]
 
+def decode_string_desc(data):
+    # don't need the length nor desc type
+    return data[2:].decode('utf-16')
+
+def decode_language_list(data):
+    languages = []
+    # don't need the length nor desc type
+    for i in range(2, len(data), 2):
+        languages.append(data[i] | (data[i+1] << 8))
+    return languages
+
+@dataclass
+class HwInterface:
+    link_type : int
+    name : str
+
+@dataclass(frozen=True)
+class DevMap:
+    bus : int
+    device : int
+
 class Endpoint:
     address : int
     attributes : int
     max_packet_size : int
     interval : int
 
-    struct = struct.Struct("BBHB")
+    struct = struct.Struct("BBBBHB")
 
     ADDRESS_MASK = 0x0F
     ADDRESS_DIR_MASK = 0x80
@@ -113,8 +122,8 @@ class Endpoint:
     ATTRIB_ISO_USAGE_EXPLICIT = 0x20
     ATTRIB_ISO_USAGE_RESERVED = 0x30
 
-    def __init__(self):
-        self.ddress, self.ttributes, self.ax_packet_size, self.nterval = \
+    def __init__(self, data):
+        length, desc, self.address, self.attributes, self.max_packet_size, self.interval = \
             self.struct.unpack(data[:self.struct.size])
 
     def __str__(self):
@@ -163,15 +172,19 @@ class HID:
 
     # I guess python really does suck
     # specify endianness to ignore alignment?
-    struct = struct.Struct("<HBBBH")
+    struct = struct.Struct("<BBHBBBH")
 
-    def __init__(self):
-        self.hid, self.country_code, self.num_descriptors, self.descriptor_type, \
-            self.descriptor_length = self.struct.unpack(self.data[:self.struct.size])
+    def decode(self, data):
+        # TODO: Decide HID
+        pass
+
+    def __init__(self, data):
+        length, desc, self.hid, self.country_code, self.num_descriptors, self.descriptor_type, \
+            self.descriptor_length = self.struct.unpack(data[:self.struct.size])
 
     def __str__(self):
         return f"HID  ID: {strbcd(self.hid)} Country Code: {self.country_code}" \
-               f" Descriptors: {self.num_descriptor} Type: {self.descriptor_type}" \
+               f" Descriptors: {self.num_descriptors} Type: {self.descriptor_type}" \
                f" Descriptor Length: {self.descriptor_length}"
 
 class Interface:
@@ -183,7 +196,7 @@ class Interface:
     protocol : int
     interface_string_id : int
 
-    struct = struct.Struct("BBBBBBB")
+    struct = struct.Struct("BBBBBBBBB")
 
     INTERFACE_CLASS_HID = 3
 
@@ -197,22 +210,23 @@ class Interface:
         hidsize = 0
         if self.interface_class == self.INTERFACE_CLASS_HID:
             hidsize = HID.struct.size
-        return len(self.endpoints) * Endpoint.struct.size + hidsize
+        return len(self.endpoints) * Endpoint.struct.size + self.struct.size + hidsize
+
+    def decode_hid(self, data):
+        self.hid.decode(data)
 
     def __init__(self, data):
-        self.interface_id, self.alternate_setting, self.num_endpoints, \
+        length, desc, self.interface_id, self.alternate_setting, self.num_endpoints, \
             self.interface_class, self.subclass, self.protocol, \
             self.interface_string_id = self.struct.unpack(data[:self.struct.size])
         self.endpoints = []
-        pos = 0
+        pos = self.struct.size
         if self.interface_class == self.INTERFACE_CLASS_HID:
-            pos += desc_start.size
             self.hid = HID(data[pos:])
             pos += HID.struct.size
         else:
             raise UninterpretableDataException(f"Unknown interface class {self.interface_class}")
-        for j in range(num_endpoints):
-            pos += desc_start.size
+        for j in range(self.num_endpoints):
             self.endpoints.append(Endpoint(data[pos:]))
             pos += Endpoint.struct.size
         self.interface_string = ""
@@ -239,22 +253,21 @@ class Configuration:
     attributes : int
     max_power : int
 
-    struct = struct.Struct("HBBBBB")
+    struct = struct.Struct("BBHBBBBB")
 
     ATTRIB_SELF_POWERED = 0x40
     ATTRIB_REMOTE_WAKEUP = 0x20
 
     def __init__(self, data):
-        self.total_length, self.num_interfaces, self.configuration_id, \
+        length, desc, self.total_length, self.num_interfaces, self.configuration_id, \
             self.configuration_string_id, self.attributes, self.max_power \
-            = self.struct.unpack(data[desc_start.size:desc_start.size+self.struct.size])
+            = self.struct.unpack(data[:self.struct.size])
         self.interfaces = []
-        if len(data) >= self.total_length:
+        if len(data) >= self.total_length - URB.SIZE:
             # decode following interfaces
-            pos = desc_start.size + self.struct.size
-            for i in range(num_interfaces):
-                pos += desc_start.size # don't bother decoding the lengths and types...
-                self.interfaces.append(Interface(self.data[pos:]))
+            pos = self.struct.size
+            for i in range(self.num_interfaces):
+                self.interfaces.append(Interface(data[pos:]))
                 pos += self.interfaces[-1].get_size()
         self.configuration_string = ""
 
@@ -267,6 +280,11 @@ class Configuration:
             if interface.set_string(index, value):
                 found = True
         return found
+
+    def decode_hid(self, interface, data):
+        for iface in self.interfaces:
+            if iface.interface_id == interface:
+                iface.decode_hid(data)
 
     def __str__(self):
         ret = f"Configuration  Total Length: {self.total_length} Interfaces: {self.num_interfaces}" \
@@ -302,21 +320,25 @@ class Device:
     serial_number_string_id : int
     num_configs : int
 
-    struct = struct.Struct("HBBBBHHHBBBB")
+    struct = struct.Struct("BBHBBBBHHHBBBB")
 
     def __init__(self, data):
-        self.usb, self.dev_class, self.sub_class, self.protocol, \
+        length, desc, self.usb, self.dev_class, self.sub_class, self.protocol, \
             self.max_packet_size, self.vendor, self.product, \
             self.device, self.manufacturer_string_id, \
             self.product_string_id, self.serial_number_string_id, \
             self.num_configs = self.struct.unpack(data[:self.struct.size])
-        self.configurations = []
+        self.configurations = {}
         self.manufacturer_string = ""
         self.product_string = ""
         self.serial_number_string = ""
+        self.configuration = None
 
-    def add_configuration(self, configuration):
-        self.configurations.append(configuration)
+    def add_configuration(self, config):
+        self.configurations[config.configuration_id] = config
+
+    def set_configuration(self, num):
+        self.configuration = num
 
     def set_string(self, index, value):
         found = False
@@ -330,10 +352,13 @@ class Device:
             used, self.serial_number_string = get_better_string(self.serial_number_string, value)
             if used:
                 found = True
-        for config in self.configurations:
-            if config.set_string(index, value):
+        for config in self.configurations.keys():
+            if self.configurations[config].set_string(index, value):
                 found = True
         return found
+
+    def decode_hid(self, interface, data):
+        self.configurations[self.configuration].decode_hid(interface, data)
 
     def __eq__(self, other):
         # I don't know the official way to compare devices, and the serial number isn't guaranteed to be known yet
@@ -404,6 +429,7 @@ class SetupURB:
 
     DESCRIPTOR_MASK = 0xFF00
     INDEX_MASK = 0x00FF
+    # Device?
     DESCRIPTOR_DEVICE = 0x0100
     DESCRIPTOR_CONFIGURATION = 0x0200
     DESCRIPTOR_STRING = 0x0300
@@ -413,6 +439,8 @@ class SetupURB:
     DESCRIPTOR_OTHER_SPEED_CONFIGURATION = 0x0700
     DESCRIPTOR_INTERFACE_POWER = 0x0800
     DESCRIPTOR_ON_THE_GO = 0x0900
+    # Interface
+    DESCRIPTOR_HID = 0x2200
 
     def __init__(self, data):
         self.bmRequestType, self.bRequest, self.wValue, self.wIndex, self.wLength = \
@@ -420,6 +448,34 @@ class SetupURB:
 
     def direction(self):
         return self.bmRequestType & self.TYPE_DIR_MASK
+
+    def get_desc_value(self):
+        return self.wValue & self.DESCRIPTOR_MASK
+
+    def get_desc_index(self):
+        return self.wValue & self.INDEX_MASK
+
+    def str_device_descriptor(self):
+        match self.get_desc_value():
+            case self.DESCRIPTOR_DEVICE:
+                return "Device"
+            case self.DESCRIPTOR_CONFIGURATION:
+                return "Configuration"
+            case self.DESCRIPTOR_STRING:
+                return "String"
+            case self.DESCRIPTOR_INTERFACE:
+                return "Interface"
+            case self.DESCRIPTOR_ENDPOINT:
+                return "Endpoint"
+            case self.DESCRIPTOR_DEVICE_QUALIFIER:
+                return "Device-Qualifier"
+            case self.DESCRIPTOR_OTHER_SPEED_CONFIGURATION:
+                return "Other-Speed-Configuration"
+            case self.DESCRIPTOR_INTERFACE_POWER:
+                return "Interface-Power"
+            case self.DESCRIPTOR_ON_THE_GO:
+                return "On-The-Go"
+        return "Unknown {self.get_desc_value()}"
 
     def __str__(self):
         setup_direction = "Host-To-Device"
@@ -448,7 +504,7 @@ class SetupURB:
                     case self.REQUEST_SET_ADDRESS:
                         setup_request = "SET_ADDRESS"
                     case self.REQUEST_GET_DESCRIPTOR:
-                        setup_request = "GET_DESCRIPTOR"
+                        setup_request = f"GET_DESCRIPTOR {self.str_device_descriptor()}"
                     case self.REQUEST_SET_DESCRIPTOR:
                         setup_request = "SET_DESCRIPTOR"
                     case self.REQUEST_GET_CONFIGURATION:
@@ -473,6 +529,12 @@ class SetupURB:
                                 setup_request = "SET_IDLE"
                     case self.REQUEST_SET_INTERFACE:
                         setup_request = "SET_INTERFACE"
+                    case self.REQUEST_GET_DESCRIPTOR:
+                        match self.get_desc_value():
+                            case self.DESCRIPTOR_HID:
+                                setup_request = "GET_DESCRIPTOR HID Report"
+                            case x:
+                                setup_request = f"GET_DESCRIPTOR (INTERFACE) {x}"
             case self.TYPE_RECIPIENT_ENDPOINT:
                 setup_recipient = "Endpoint"
                 match self.bRequest:
@@ -492,61 +554,50 @@ class SetupURB:
                f"Setup Value: {self.wValue}, Setup Index: {self.wIndex}, " \
                f"Setup Data Length: {self.wLength}"
 
-    def get_value_desc(self):
-        return self.wValue & self.DESCRIPTOR_MASK
-
-    def get_value_index(self):
-        return self.wValue & self.INDEX_MASK
-
-    def descriptor_string(self):
-        match self.get_value_desc():
-            case self.DESCRIPTOR_DEVICE:
-                return "Device"
-            case self.DESCRIPTOR_CONFIGURATION:
-                return "Configuration"
-            case self.DESCRIPTOR_STRING:
-                return "String"
-            case self.DESCRIPTOR_INTERFACE:
-                return "Interface"
-            case self.DESCRIPTOR_ENDPOINT:
-                return "Endpoint"
-            case self.DESCRIPTOR_DEVICE_QUALIFIER:
-                return "Device-Qualifier"
-            case self.DESCRIPTOR_OTHER_SPEED_CONFIGURATION:
-                return "Other-Speed-Configuration"
-            case self.DESCRIPTOR_INTERFACE_POWER:
-                return "Interface-Power"
-            case self.DESCRIPTOR_ON_THE_GO:
-                return "On-The-Go"
-        return "Unknown"
+    MATCH_REQUEST_GET_STATUS = (TYPE_DIR_DEVICE_TO_HOST | TYPE_STANDARD | TYPE_RECIPIENT_DEVICE, REQUEST_GET_STATUS)
+    MATCH_REQUEST_CLEAR_FEATURE = (TYPE_DIR_HOST_TO_DEVICE | TYPE_STANDARD | TYPE_RECIPIENT_DEVICE, REQUEST_CLEAR_FEATURE)
+    MATCH_REQUEST_SET_FEATURE = (TYPE_DIR_HOST_TO_DEVICE | TYPE_STANDARD | TYPE_RECIPIENT_DEVICE, REQUEST_SET_FEATURE)
+    MATCH_REQUEST_SET_ADDRESS = (TYPE_DIR_HOST_TO_DEVICE | TYPE_STANDARD | TYPE_RECIPIENT_DEVICE, REQUEST_SET_ADDRESS)
+    MATCH_REQUEST_GET_DESCRIPTOR = (TYPE_DIR_DEVICE_TO_HOST | TYPE_STANDARD | TYPE_RECIPIENT_DEVICE, REQUEST_GET_DESCRIPTOR)
+    MATCH_REQUEST_SET_DESCRIPTOR = (TYPE_DIR_HOST_TO_DEVICE | TYPE_STANDARD | TYPE_RECIPIENT_DEVICE, REQUEST_SET_DESCRIPTOR)
+    MATCH_REQUEST_GET_CONFIGURATION = (TYPE_DIR_DEVICE_TO_HOST | TYPE_STANDARD | TYPE_RECIPIENT_DEVICE, REQUEST_GET_CONFIGURATION)
+    MATCH_REQUEST_SET_CONFIGURATION = (TYPE_DIR_HOST_TO_DEVICE | TYPE_STANDARD | TYPE_RECIPIENT_DEVICE, REQUEST_SET_CONFIGURATION)
+    MATCH_REQUEST_SET_IDLE = (TYPE_DIR_HOST_TO_DEVICE | TYPE_CLASS | TYPE_RECIPIENT_INTERFACE, REQUEST_SET_IDLE)
+    MATCH_REQUEST_GET_INTERFACE_DESCRIPTOR = (TYPE_DIR_DEVICE_TO_HOST | TYPE_STANDARD | TYPE_RECIPIENT_INTERFACE, REQUEST_GET_DESCRIPTOR)
 
     def decode(self):
-        ret = f"Setup Request Interpretation Unimplemented {self.bRequest:02X} {self.bmRequestType:02X}"
         match (self.bmRequestType, self.bRequest):
-            case (self.TYPE_DIR_DEVICE_TO_HOST | self.TYPE_STANDARD | self.TYPE_RECIPIENT_DEVICE, self.REQUEST_GET_STATUS):
-                ret = f"Setup Request Device Status"
-            case (self.TYPE_DIR_HOST_TO_DEVICE | self.TYPE_STANDARD | self.TYPE_RECIPIENT_DEVICE, self.REQUEST_CLEAR_FEATURE):
-                ret = f"Setup Request Clear Feature {self.wValue}"
-            case (self.TYPE_DIR_HOST_TO_DEVICE | self.TYPE_STANDARD | self.TYPE_RECIPIENT_DEVICE, self.REQUEST_SET_FEATURE):
-                ret = f"Setup Request Set Feature {self.wValue}"
-            case (self.TYPE_DIR_HOST_TO_DEVICE | self.TYPE_STANDARD | self.TYPE_RECIPIENT_DEVICE, self.REQUEST_SET_ADDRESS):
-                ret = f"Setup Request Set Address to {self.wValue}"
-            case (self.TYPE_DIR_DEVICE_TO_HOST | self.TYPE_STANDARD | self.TYPE_RECIPIENT_DEVICE, self.REQUEST_GET_DESCRIPTOR):
-                ret = f"Setup Request Get Descriptor {self.descriptor_string()}" \
-                      f" {self.get_value_index()} Language ID: {self.wIndex}" \
-                      f" Requested Length: {self.wLength}"
-            case (self.TYPE_DIR_HOST_TO_DEVICE | self.TYPE_STANDARD | self.TYPE_RECIPIENT_DEVICE, self.REQUEST_SET_DESCRIPTOR):
-                ret = f"Setup Request Set Descriptor {self.descriptor_string()}" \
-                      f" {self.get_value_index()} Language ID: {self.wIndex}" \
-                      f" Requested Length: {self.wLength}"
-            case (self.TYPE_DIR_DEVICE_TO_HOST | self.TYPE_STANDARD | self.TYPE_RECIPIENT_DEVICE, self.REQUEST_GET_CONFIGURATION):
-                ret = f"Setup Request Get Configuration"
-            case (self.TYPE_DIR_HOST_TO_DEVICE | self.TYPE_STANDARD | self.TYPE_RECIPIENT_DEVICE, self.REQUEST_SET_CONFIGURATION):
-                ret = f"Setup Request Set Configuration {self.wValue}"
-            case (self.TYPE_DIR_HOST_TO_DEVICE | self.TYPE_CLASS | self.TYPE_RECIPIENT_INTERFACE, self.REQUEST_SET_IDLE):
-            #case (0x21, 0x0A): # dunno why this doesn't work
-                ret = "Setup Request Set Idle"
-        return ret
+            case self.MATCH_REQUEST_GET_STATUS:
+                return "Setup Request Device Status"
+            case self.MATCH_REQUEST_CLEAR_FEATURE:
+                return f"Setup Request Clear Feature {self.wValue}"
+            case self.MATCH_REQUEST_SET_FEATURE:
+                return f"Setup Request Set Feature {self.wValue}"
+            case self.MATCH_REQUEST_SET_ADDRESS:
+                return f"Setup Request Set Address to {self.wValue}"
+            case self.MATCH_REQUEST_GET_DESCRIPTOR:
+                return f"Setup Request Get Descriptor {self.str_device_descriptor()}" \
+                       f" {self.get_desc_index()} Language ID: {self.wIndex}" \
+                       f" Requested Length: {self.wLength}"
+            case self.MATCH_REQUEST_SET_DESCRIPTOR:
+                return f"Setup Request Set Descriptor {self.str_device_descriptor()}" \
+                       f" {self.get_desc_index()} Language ID: {self.wIndex}" \
+                       f" Requested Length: {self.wLength}"
+            case self.MATCH_REQUEST_GET_CONFIGURATION:
+                return "Setup Request Get Configuration"
+            case self.MATCH_REQUEST_SET_CONFIGURATION:
+                return f"Setup Request Set Configuration {self.wValue}"
+            case self.MATCH_REQUEST_SET_IDLE:
+                return "Setup Request Set Idle"
+            case self.MATCH_REQUEST_GET_INTERFACE_DESCRIPTOR:
+                match self.get_desc_value():
+                    case self.DESCRIPTOR_HID:
+                        return f"Setup Request HID Report {self.wIndex}"
+                    case x:
+                        return f"Setup Request Get Interface Descriptor {x}" \
+                               f" {self.get_desc_index()} Language ID: {self.wIndex}" \
+                               f" Requested Length: {self.wLength}"
+        return f"Setup Request Interpretation Unimplemented {self.bRequest:02X} {self.bmRequestType:02X}"
 
 class ISOURB:
     error_count : int
@@ -606,7 +657,7 @@ class URB:
     DESC_TYPE_INTERFACE = 4
     DESC_TYPE_ENDPOINT = 5
 
-    HID_DESCRIPTOR_TYPE = 0x22
+    SIZE = struct_start.size + SetupURB.struct.size + struct_end.size
 
     def direction(self):
         return self.epnum & self.ENDPOINT_DIR_MASK
@@ -649,58 +700,74 @@ class URB:
 
         return urb_type_str, xfer_type_str, direction, data_present, status_str
 
+    def is_error(self):
+        if -self.status in (0, errno.EINPROGRESS):
+            return False
+        return True
+
     def __init__(self, data, prev, verbose):
         self.prev = prev
+        self.rawdata = data
         # get beginning
         self.urb_id, self.urb_type, self.xfer_type, self.epnum, self.devnum, self.busnum, \
             self.flag_setup, self.flag_data, self.ts_sec, self.ts_nsec, self.status, \
             self.length, self.len_cap = self.struct_start.unpack(data[:self.struct_start.size])
         # get end
         self.interval, self.start_frame, self.xfer_flags, self.ndesc = \
-            self.struct_end.unpack(data[self.struct_start.size+ISOURB.struct.size:self.struct_start.size+ISOURB.struct.size+self.struct_end.size])
+            self.struct_end.unpack(data[self.struct_start.size+SetupURB.struct.size:self.struct_start.size+SetupURB.struct.size+self.struct_end.size])
 
-        self.data = data[self.struct_start.size+ISOURB.struct.size+self.struct_end.size:]
+        self.data = data[self.SIZE:]
+
+        if self.is_error():
+            return
 
         self.dev_map = DevMap(self.busnum, self.devnum)
         match self.xfer_type:
             case self.XFER_TYPE_CONTROL:
                 if self.flag_setup == self.FLAG_SETUP:
+                    # setup request
                     self.extra = SetupURB(data[self.struct_start.size:])
                 else:
-                    if len(self.data) > 0:
-                        desc_len, desc_type = desc_start.unpack(self.data[:desc_start.size])
-                        match desc_type:
-                            case self.DESC_TYPE_DEVICE:
-                                self.new_dev = Device(self.data[desc_start.size:])
-                                # add new devices if they replace the old, and aren't a duplicate report
-                                if self.dev_map in devmap:
-                                    if self.new_dev == devmap[self.dev_map]:
-                                        if verbose:
-                                            print(f"{self.str_endpoint()} Ignoring same device in {self.dev_map.bus}.{self.dev_map.device}: {new_dev}")
-                                    else:
-                                        add_new_device(self.new_dev, self.dev_map)
-                                        if verbose:
-                                            print(f"{self.str_endpoint()} Replacement in {self.dev_map.bus}.{self.dev_map.device}: {new_dev}")
-                                add_new_device(self.new_dev, self.dev_map)
-                            case self.DESC_TYPE_CONFIGURATION:
-                                self.new_config = Configuration(data[desc_start.size:])
-                                devmap[self.dev_map].add_configuration(self.new_config)
-                            case self.DESC_TYPE_STRING:
-                                index = self.prev.extra.get_value_index()
-                                if index != 0:
-                                    self.new_str = self.data[desc_start.size:].decode('utf-16')
-                                    used = devmap[self.dev_map].set_string(index, self.new_str)
-                                    if verbose and not used:
-                                        print(f"{self.str_endpoint()} String \"{self.new_str}\" Not Used")
-                            #case self.DESC_TYPE_INTERFACE:
-                            #case self.DESC_TYPE_ENDPOINT:
-                if verbose:
-                    print(f"{self.str_endpoint()} Unsupported Control Response")
-
+                    prev = self.prev
+                    if prev.flag_setup == self.FLAG_SETUP:
+                        match (prev.extra.bmRequestType, prev.extra.bRequest):
+                            case SetupURB.MATCH_REQUEST_SET_CONFIGURATION:
+                                devmap[self.dev_map].set_configuration(prev.extra.get_desc_index())
+                            case SetupURB.MATCH_REQUEST_GET_DESCRIPTOR:
+                                # setup with device descriptor request response
+                                # maybe compare these values...
+                                match prev.extra.get_desc_value():
+                                    case SetupURB.DESCRIPTOR_DEVICE:
+                                        self.new_dev = Device(self.data)
+                                        # add new devices if they replace the old, and aren't a duplicate report
+                                        if self.dev_map in devmap:
+                                            if self.new_dev == devmap[self.dev_map]:
+                                                if verbose:
+                                                    print(f"{self.str_endpoint()} Ignoring same device in {self.dev_map.bus}.{self.dev_map.device}: {self.new_dev}")
+                                            else:
+                                                add_new_device(self.new_dev, self.dev_map)
+                                                if verbose:
+                                                    print(f"{self.str_endpoint()} Replacement in {self.dev_map.bus}.{self.dev_map.device}: {self.new_dev}")
+                                        else:
+                                            add_new_device(self.new_dev, self.dev_map)
+                                    case SetupURB.DESCRIPTOR_CONFIGURATION:
+                                        self.new_config = Configuration(self.data)
+                                        devmap[self.dev_map].add_configuration(self.new_config)
+                                    case SetupURB.DESCRIPTOR_STRING:
+                                        index = prev.extra.get_desc_index()
+                                        if index != 0:
+                                            self.new_str = decode_string_desc(self.data)
+                                            used = devmap[self.dev_map].set_string(index, self.new_str)
+                                            if verbose and not used:
+                                                print(f"{self.str_endpoint()} String \"{self.new_str}\" Not Used")
+                            case SetupURB.MATCH_REQUEST_GET_INTERFACE_DESCRIPTOR:
+                                match prev.extra.get_desc_value():
+                                    case SetupURB.DESCRIPTOR_HID:
+                                        devmap[self.dev_map].decode_hid(prev.extra.get_desc_index(), self.data)
     def __str__(self):
         urb_type_str, xfer_type_str, direction, data_present, status_str = self.field_decode()
         ret = f"URB ID: {self.urb_id:X}, URB Type: {urb_type_str}, Transfer Type: {xfer_type_str}, " \
-              f"Direction/Subject: {direction}, Endpoint: {self.endpoint}, " \
+              f"Direction/Subject: {direction}, Endpoint: {self.endpoint()}, " \
               f"Device: {self.devnum}, Bus: {self.busnum}, Setup Flag: {self.flag_setup}, " \
               f"Data Flag: {data_present}, Time: {self.ts_sec}, {self.ts_nsec}, " \
               f"Status: {status_str}, Requested Packet Length: {self.length}, " \
@@ -716,60 +783,61 @@ class URB:
         return ret
 
     def decode(self):
-        if -self.status not in (0, errno.EINPROGRESS):
+        if self.is_error():
             return f"{self.str_endpoint()} Error {-self.status} {errno.errorcode[-self.status]}"
 
+        prev = self.prev
         match self.xfer_type:
             case self.XFER_TYPE_CONTROL:
                 if self.flag_setup == self.FLAG_SETUP:
                     # setup request
                     return f"{self.str_endpoint()} {self.extra.decode()}"
                 else:
-                    # responses
-                    if len(self.data) == 0:
-                        prev_setup = self.prev.extra
-                        match (prev_setup.bmRequestType, prev_setup.bRequest):
-                            case (SetupURB.TYPE_DIR_DEVICE_TO_HOST | SetupURB.TYPE_STANDARD | SetupURB.TYPE_RECIPIENT_DEVICE,
-                                  SetupURB.REQUEST_SET_CONFIGURATION):
-                                return f"{self.str_endpoint()} Set Configuration Response {prev_setup.wValue}"
-                            case (SetupURB.TYPE_DIR_HOST_TO_DEVICE | SetupURB.TYPE_CLASS | SetupURB.TYPE_RECIPIENT_INTERFACE,
-                                  SetupURB.REQUEST_SET_IDLE):
-                            #case (0x21, 0x0A): # as above...
+                    if prev.flag_setup == self.FLAG_SETUP:
+                        # setup response
+                        match (prev.extra.bmRequestType, prev.extra.bRequest):
+                            case SetupURB.MATCH_REQUEST_SET_CONFIGURATION:
+                                return f"{self.str_endpoint()} Set Configuration Response"
+                            case SetupURB.MATCH_REQUEST_SET_IDLE:
                                 return f"{self.str_endpoint()} Set Idle Response"
-                    else:
-                        desc_len, desc_type = desc_start.unpack(self.data[:desc_start.size])
-                        match desc_type:
-                            case self.DESC_TYPE_DEVICE:
-                                return f"{self.str_endpoint()} {self.new_dev}"
-                            case self.DESC_TYPE_CONFIGURATION:
-                                return f"{self.str_endpoint()} Configuration Response: {self.new_config}"
-                            case self.DESC_TYPE_STRING:
-                                index = self.prev.extra.get_value_index()
-                                if index == 0:
-                                    ret = f"{self.str_endpoint()} String Languages Response:"
-                                    for i in range(desc_start.size, desc_len-desc_start.size+1, 2):
-                                        ret += f" {self.data[i] | (self.data[i+1] << 8):04X}"
-                                    return ret
-                                return f"{self.str_endpoint()} String Response: \"{self.new_str}\""
-                            #case self.DESC_TYPE_INTERFACE:
-                            #case self.DESC_TYPE_ENDPOINT:
+                            case SetupURB.MATCH_REQUEST_GET_DESCRIPTOR:
+                                if len(self.data) == 0:
+                                    return f"{self.str_endpoint()} Response with No Data"
+                                else:
+                                    match prev.extra.get_desc_value():
+                                        case SetupURB.DESCRIPTOR_DEVICE:
+                                            return f"{self.str_endpoint()} {self.new_dev}"
+                                        case SetupURB.DESCRIPTOR_CONFIGURATION:
+                                            return f"{self.str_endpoint()} {self.new_config}"
+                                        case SetupURB.DESCRIPTOR_STRING:
+                                            index = prev.extra.get_desc_index()
+                                            if index == 0:
+                                                ret = f"{self.str_endpoint()} String Languages Record:"
+                                                for language in decode_language_list(self.data):
+                                                    ret += f" {language}"
+                                                return ret
+                                            return f"{self.str_endpoint()} String Response: \"{self.new_str}\""
+                            case SetupURB.MATCH_REQUEST_GET_INTERFACE_DESCRIPTOR:
+                                match prev.extra.get_desc_value():
+                                    case SetupURB.DESCRIPTOR_HID:
+                                        return f"{self.str_endpoint()} HID Report Response"
                 return f"{self.str_endpoint()} Unsupported Control Response"
             case self.XFER_TYPE_INTERRUPT:
                 if self.direction() == self.ENDPOINT_DIR_IN:
-                    ret = "{self.str_endpoint()} Interrupt Packet In"
+                    ret = f"{self.str_endpoint()} Interrupt Packet In"
                     if len(self.data) == 0:
-                        if self.prev.xfer_type == self.XFER_TYPE_INTERRUPT and \
-                           self.prev.direction() == self.ENDPOINT_DIR_IN and \
+                        if prev.xfer_type == self.XFER_TYPE_INTERRUPT and \
+                           prev.direction() == self.ENDPOINT_DIR_IN and \
                            self.urb_type == self.URB_TYPE_SUBMIT:
                             ret += " Acknowledge" 
                         else:
                             ret += " No Data"
                     return ret
                 else: # Out
-                    ret = "Interrupt Packet Out"
+                    ret = f"I{self.str_endpoint()} nterrupt Packet Out"
                     if len(self.data) == 0:
-                        if self.prev.xfer_type == self.XFER_TYPE_INTERRUPT and \
-                           self.prev.direction() == self.ENDPOINT_DIR_OUT and \
+                        if prev.xfer_type == self.XFER_TYPE_INTERRUPT and \
+                           prev.direction() == self.ENDPOINT_DIR_OUT and \
                            self.urb_type == self.URB_TYPE_COMPLETE:
                             ret += " Acknowledge" 
                         else:
