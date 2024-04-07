@@ -105,7 +105,7 @@ class HID:
 
     def decode_desc(self, data):
         # TODO: decode HID
-        pass
+        print(str_hex(data))
 
     def __init__(self, data):
         length, desc, self.hid, self.country_code, self.num_descriptors, self.descriptor_type, \
@@ -208,7 +208,14 @@ class Interface:
 
     struct = struct.Struct("BBBBBBBBB")
 
-    INTERFACE_CLASS_HID = 3
+    CLASS_HID = 3
+
+    SUBCLASS_HID_NO_SUBCLASS = 0
+    SUBCLASS_HID_BOOT = 1
+
+    PROTOCOL_HID_NONE = 0
+    PROTOCOL_HID_KEYBOARD = 1
+    PROTOCOL_HID_MOUSE = 2
 
     def set_string(self, index, value):
         if self.interface_string_id == index:
@@ -218,7 +225,7 @@ class Interface:
 
     def get_size(self):
         hidsize = 0
-        if self.interface_class == self.INTERFACE_CLASS_HID:
+        if self.interface_class == self.CLASS_HID:
             hidsize = HID.struct.size
         return len(self.endpoints) * Endpoint.struct.size + self.struct.size + hidsize
 
@@ -226,7 +233,7 @@ class Interface:
         self.hid.decode_desc(data)
 
     def interrupt(self, urb):
-        if self.interface_class == self.INTERFACE_CLASS_HID:
+        if self.interface_class == self.CLASS_HID:
             self.endpoints[urb.get_endpoint()].interrupt(urb)
 
     def __init__(self, data):
@@ -235,7 +242,7 @@ class Interface:
             self.interface_string_id = self.struct.unpack(data[:self.struct.size])
         self.endpoints = {}
         pos = self.struct.size
-        if self.interface_class == self.INTERFACE_CLASS_HID:
+        if self.interface_class == self.CLASS_HID:
             self.hid = HID(data[pos:])
             pos += HID.struct.size
         else:
@@ -247,17 +254,32 @@ class Interface:
         self.interface_string = ""
 
     def __str__(self):
+        subclass_str = " Unknown"
+        protocol_str = " Unknown"
+        if self.interface_class == self.CLASS_HID:
+            match self.subclass:
+                case self.SUBCLASS_HID_NO_SUBCLASS:
+                    subclass_str = " No Subclass"
+                case self.SUBCLASS_HID_BOOT:
+                    subclass_str = " Boot"
+            match self.protocol:
+                case self.PROTOCOL_HID_NONE:
+                    protocol_str = " None"
+                case self.PROTOCOL_HID_KEYBOARD:
+                    protocol_str = " Keyboard"
+                case self.PROTOCOL_HID_MOUSE:
+                    protocol_str = " Mouse"
         ret = f"Interface  ID: {self.interface_id} Alternate Setting: {self.alternate_setting}" \
               f" Endpoints: {self.num_endpoints} Class: {self.interface_class}" \
-              f" Subclass: {self.subclass} Protocol: {self.protocol}"
+              f" Subclass: {self.subclass}{subclass_str} Protocol: {self.protocol}{protocol_str}"
         if len(self.interface_string) == 0:
             ret += f" Interface String Index: {self.interface_string_id}"
         else:
             ret += f" Interface String: \"{self.interface_string}\""
-        if self.interface_class == self.INTERFACE_CLASS_HID:
+        if self.interface_class == self.CLASS_HID:
             ret += f"\n{self.hid}"
-        for endpoint in self.endpoints:
-            ret += f"\n{endpoint}"
+        for endpoint in self.endpoints.keys():
+            ret += f"\n{self.endpoints[endpoint]}"
         return ret
 
 class Configuration:
@@ -318,8 +340,8 @@ class Configuration:
         if self.attributes & self.ATTRIB_REMOTE_WAKEUP:
             ret += f" Remote-Wakeup"
         ret += f" Max Power: {self.max_power*2}mA"
-        for interface in self.interfaces:
-            ret += f"\n{str(interface)}"
+        for interface in self.interfaces.keys():
+            ret += f"\n{self.interfaces[interface]}"
         return ret
 
 class InterruptNoData:
@@ -376,7 +398,11 @@ class Device:
         self.configuration = None
 
     def add_configuration(self, config):
-        self.configurations[config.configuration_id] = config
+        # don't replace existing configuration objects, unless they
+        # have no interfaces yet
+        if config.configuration_id not in self.configurations or \
+           len(self.configurations[config.configuration_id].interfaces) == 0:
+            self.configurations[config.configuration_id] = config
 
     def set_configuration(self, num):
         self.configuration = num
@@ -421,7 +447,6 @@ class Device:
                     return InterruptNoData("Out")
         return InterruptUnknown("Out", urb.data)
 
-
     def __eq__(self, other):
         # I don't know the official way to compare devices, and the serial number isn't guaranteed to be known yet
         return self.vendor == other.vendor and self.product == other.product and self.device == other.device
@@ -443,8 +468,8 @@ class Device:
         else:
             ret += f" Serial Number String String: \"{self.serial_number_string}\""
         ret += f" Number of Configurations: {self.num_configs}"
-        for config in self.configurations:
-            ret += f"\n{str(config)}"
+        for config in self.configurations.keys():
+            ret += f"\n{self.configurations[config]}"
         return ret
 
 class SetupURB:
@@ -839,11 +864,9 @@ class URB:
               f"Start Frame: {self.start_frame}, Transfer Flags: {self.xfer_flags}, " \
               f"ISO Descriptors: {self.ndesc}"
         if self.flag_setup == self.FLAG_SETUP:
-            ret += f", {self.extra}\n"
-        else:
-            ret += f"\n"
+            ret += f", {self.extra}"
         if len(self.data) > 0:
-            ret += f"{str_hex(self.data)}"
+            ret += f"\n{str_hex(self.data)}"
         return ret
 
     def decode(self):
@@ -913,13 +936,13 @@ def decode(infile, verbose):
             try:
                 urb = URB(block.packet_data, urb, verbose)
                 if verbose:
-                    print(urb, end='')
+                    print(urb)
                 print(urb.decode())
             except Exception as e:
                 print(str_hex(block.packet_data))
                 raise e
         elif isinstance(block, pcapng.blocks.InterfaceStatistics):
-            print("s", end='')
+            pass
         else:
             print("Unhandled block type")
             print(block)
