@@ -99,22 +99,241 @@ class HID:
     descriptor_type : int
     descriptor_length : int
 
+    ITEM_SHORT_HDR_SIZE = 1
+    ITEM_SIZE_MASK = 0x03
+    ITEM_SIZE = {0x00: 0, 0x01: 1, 0x02: 2, 0x03: 4}
+
+    ITEM_TYPE_MASK = 0x0C
+    ITEM_TYPE_MAIN = 0x00
+    ITEM_TYPE_GLOBAL = 0x04
+    ITEM_TYPE_LOCAL = 0x08
+    ITEM_TYPE_RESERVED = 0x0C
+
+    ITEM_TAG_MASK = 0xF0
+    ITEM_MAIN_INPUT = 0x80
+    ITEM_MAIN_OUTPUT = 0x90
+    ITEM_MAIN_FEATURE = 0xB0
+    ITEM_MAIN_COLLECTION = 0xA0
+    ITEM_MAIN_END_COLLECTION = 0xC0
+    ITEM_GLOBAL_USAGE_PAGE = 0x00
+    ITEM_GLOBAL_LOGICAL_MINIMUM = 0x10
+    ITEM_GLOBAL_LOGICAL_MAXIMUM = 0x20
+    ITEM_GLOBAL_PHYSICAL_MINIMUM = 0x30
+    ITEM_GLOBAL_PHYSICAL_MAXIMUM = 0x40
+    ITEM_GLOBAL_UNIT_EXPONENT = 0x50
+    ITEM_GLOBAL_UNIT = 0x60
+    ITEM_GLOBAL_REPORT_SIZE = 0x70
+    ITEM_GLOBAL_REPORT_ID = 0x80
+    ITEM_GLOBAL_REPORT_COUNT = 0x90
+    ITEM_GLOBAL_PUSH = 0xA0
+    ITEM_GLOBAL_POP = 0xB0
+    ITEM_LOCAL_USAGE = 0x00
+    ITEM_LOCAL_USAGE_MINIMUM = 0x10
+    ITEM_LOCAL_USAGE_MAXIMUM = 0x20
+    ITEM_LOCAL_DESIGNATOR_INDEX = 0x30
+    ITEM_LOCAL_DESIGNATOR_MINIMUM = 0x40
+    ITEM_LOCAL_DESIGNATOR_MAXIMUM = 0x50
+    ITEM_LOCAL_STRING_INDEX = 0x70
+    ITEM_LOCAL_STRING_MINIMUM = 0x80
+    ITEM_LOCAL_STRING_MAXIMUM = 0x90
+    ITEM_LOCAL_DELIMITER = 0xA0
+
+    ITEM_MAIN_FLAG_CONSTANT = 0x01 # 0 - Data
+    ITEM_MAIN_FLAG_VARIABLE = 0x02 # 0 - Array
+    ITEM_MAIN_FLAG_RELATIVE = 0x04 # 0 - Absolute
+    ITEM_MAIN_FLAG_WRAP = 0x08 # 0 - No-Wrap
+    ITEM_MAIN_FLAG_NON_LINEAR = 0x10 # 0 - Linear
+    ITEM_MAIN_FLAG_NO_PREFERRED = 0x20 # 0 - Preferred-State
+    ITEM_MAIN_FLAG_NULL_STATE = 0x40 # 0 - No-Null-Position
+    ITEM_MAIN_FLAG_VOLATILE = 0x80 # 0 - Non-Volatile
+    # next byte
+    ITEM_MAIN_FLAG_BUFFERED_BYTES = 0x01 # 0 - Bit-Field
+
+    ITEM_COLLECTION_TYPE_PHYSICAL = 0x00
+    ITEM_COLLECTION_TYPE_APPLICATION = 0x01
+    ITEM_COLLECITON_TYPE_LOGICAL = 0x02
+    ITEM_COLLECTION_TYPE_REPORT = 0x03
+    ITEM_COLLECTION_TYPE_NAMED_ARRAY = 0x04
+    ITEM_COLLECITON_TYPE_USAGE_SWITCH = 0x05
+    ITEM_COLLECTION_TYPE_USAGE_MODIFIER = 0x06
+    ITEM_COLLECTION_TYPE_VENDOR = 0x80
+
+    ITEM_LONG_HDR_SIZE = 3
+    ITEM_LONG_BYTE = 0xF7
+    ITEM_LONG_SIZE = 1
+    ITEM_LONG_TAG = 2
+
     # I guess python really does suck
     # specify endianness to ignore alignment?
     struct = struct.Struct("<BBHBBBH")
 
+    def str_main_flags(data, input_item):
+        if len(data) == 0:
+            data = (0,)
+        if data[0] & HID.ITEM_MAIN_FLAG_CONSTANT:
+            ret = "Constant"
+        else:
+            ret = "Data"
+        if data[0] & HID.ITEM_MAIN_FLAG_VARIABLE:
+            ret += ":Variable"
+        else:
+            ret += ":Data"
+        if data[0] & HID.ITEM_MAIN_FLAG_RELATIVE:
+            ret += ":Relative"
+        else:
+            ret += ":Absolute"
+        if data[0] & HID.ITEM_MAIN_FLAG_WRAP:
+            ret += ":Wrap"
+        else:
+            ret += ":No-Wrap"
+        if data[0] & HID.ITEM_MAIN_FLAG_NON_LINEAR:
+            ret += ":Non-Linear"
+        else:
+            ret += ":Linear"
+        if data[0] & HID.ITEM_MAIN_FLAG_NO_PREFERRED:
+            ret += ":No-Preferred-State"
+        else:
+            ret += ":Preferred-State"
+        if data[0] & HID.ITEM_MAIN_FLAG_NULL_STATE:
+            ret += ":Null-State"
+        else:
+            ret += ":No-Null-State"
+        if not input_item:
+            if data[0] & HID.ITEM_MAIN_FLAG_VOLATILE:
+                ret += ":Volatile"
+            else:
+                ret += ":Non-Volatile"
+        if len(data) > 1:
+            if data[0] & HID.ITEM_MAIN_FLAG_BUFFERED_BYTES:
+                ret += ":Buffered-Bytes"
+            else:
+                ret += ":Bit-Field"
+        return ret
+
+    def str_collection_type(data):
+        value = 0
+        if len(data) > 0:
+            value = data[0]
+        if value >= HID.ITEM_COLLECTION_TYPE_VENDOR:
+            return "Vendor-Defined"
+        match value:
+            case HID.ITEM_COLLECTION_TYPE_PHYSICAL:
+                return "Physical"
+            case HID.ITEM_COLLECTION_TYPE_APPLICATION:
+                return "Application"
+            case HID.ITEM_COLLECITON_TYPE_LOGICAL:
+                return "Logical"
+            case HID.ITEM_COLLECTION_TYPE_REPORT:
+                return "Report"
+            case HID.ITEM_COLLECTION_TYPE_NAMED_ARRAY:
+                return "Named-Array"
+            case HID.ITEM_COLLECITON_TYPE_USAGE_SWITCH:
+                return "Usage-Switch"
+            case HID.ITEM_COLLECTION_TYPE_USAGE_MODIFIER:
+                return "Usage-Modifier"
+        return "Unknown"
+
     def decode_desc(self, data):
-        # TODO: decode HID
-        print(str_hex(data))
+        pos = 0
+        padding = " "
+        while pos < len(data):
+            pad_change = 0
+            if data[pos] == self.ITEM_LONG_BYTE:
+                size = data[pos+self.ITEM_LONG_SIZE]
+                self.desc_str += f" Long {size}:{data[pos+self.ITEM_LONG_TAG]}"
+                pos += size + self.ITEM_LONG_HDR_SIZE
+            else:
+                size = self.ITEM_SIZE[data[pos] & self.ITEM_SIZE_MASK]
+                tag_str = "Unknown"
+                data_str = ""
+                match data[pos] & self.ITEM_TYPE_MASK:
+                    case self.ITEM_TYPE_MAIN:
+                        type_str = "Main"
+                        match data[pos] & self.ITEM_TAG_MASK:
+                            case self.ITEM_MAIN_INPUT:
+                                tag_str = "Input"
+                                data_str = HID.str_main_flags(data[pos+1:pos+1+size], True)
+                            case self.ITEM_MAIN_OUTPUT:
+                                tag_str = "Output"
+                                data_str = HID.str_main_flags(data[pos+1:pos+1+size], False)
+                            case self.ITEM_MAIN_FEATURE:
+                                tag_str = "Feature"
+                                data_str = HID.str_main_flags(data[pos+1:pos+1+size], False)
+                            case self.ITEM_MAIN_COLLECTION:
+                                tag_str = "Collection"
+                                data_str = HID.str_collection_type(data[pos+1:pos+1+size])
+                                pad_change = 1
+                            case self.ITEM_MAIN_END_COLLECTION:
+                                tag_str = "End-Collection"
+                                pad_change = -1
+                    case self.ITEM_TYPE_GLOBAL:
+                        type_str = "Global"
+                        match data[pos] & self.ITEM_TAG_MASK:
+                            case self.ITEM_GLOBAL_USAGE_PAGE:
+                                tag_str = "Usage-Page"
+                            case self.ITEM_GLOBAL_LOGICAL_MINIMUM:
+                                tag_str = "Logical-Minimum"
+                            case self.ITEM_GLOBAL_LOGICAL_MAXIMUM:
+                                tag_str = "Logical-Maximum"
+                            case self.ITEM_GLOBAL_PHYSICAL_MINIMUM:
+                                tag_str = "Physical-Minimum"
+                            case self.ITEM_GLOBAL_PHYSICAL_MAXIMUM:
+                                tag_str = "Physical-Maximum"
+                            case self.ITEM_GLOBAL_UNIT_EXPONENT:
+                                tag_str = "Unit-Exponent"
+                            case self.ITEM_GLOBAL_UNIT:
+                                tag_str = "Unit"
+                            case self.ITEM_GLOBAL_REPORT_SIZE:
+                                tag_str = "Report-Size"
+                            case self.ITEM_GLOBAL_REPORT_ID:
+                                tag_str = "Report-ID"
+                            case self.ITEM_GLOBAL_REPORT_COUNT:
+                                tag_str = "Report-Count"
+                            case self.ITEM_GLOBAL_PUSH:
+                                tag_str = "Push"
+                            case self.ITEM_GLOBAL_POP:
+                                tag_str = "Pop"
+                    case self.ITEM_TYPE_LOCAL:
+                        type_str = "Local"
+                        match data[pos] & self.ITEM_TAG_MASK:
+                            case self.ITEM_LOCAL_USAGE:
+                                tag_str = "Usage"
+                            case self.ITEM_LOCAL_USAGE_MINIMUM:
+                                tag_str = "Usage-Minimum"
+                            case self.ITEM_LOCAL_USAGE_MAXIMUM:
+                                tag_str = "Usage-Maximum"
+                            case self.ITEM_LOCAL_DESIGNATOR_INDEX:
+                                tag_str = "Designator-Index"
+                            case self.ITEM_LOCAL_DESIGNATOR_MINIMUM:
+                                tag_str = "Designator-Minimum"
+                            case self.ITEM_LOCAL_DESIGNATOR_MAXIMUM:
+                                tag_str = "Designator-Maximum"
+                            case self.ITEM_LOCAL_STRING_INDEX:
+                                tag_str = "String-Index"
+                            case self.ITEM_LOCAL_STRING_MINIMUM:
+                                tag_str = "String-Minimum"
+                            case self.ITEM_LOCAL_STRING_MAXIMUM:
+                                tag_str = "String-Maximum"
+                            case self.ITEM_LOCAL_DELIMITER:
+                                tag_str = "Delimiter"
+                    case self.ITEM_TYPE_RESERVED:
+                        type_str = "Reserved"
+                if pad_change < 0:
+                    padding = padding[:-1]
+                self.desc_str += f"\n{padding}{type_str}/{tag_str} {data_str}"
+                if pad_change > 0:
+                    padding += " "
+                pos += size + self.ITEM_SHORT_HDR_SIZE
 
     def __init__(self, data):
         length, desc, self.hid, self.country_code, self.num_descriptors, self.descriptor_type, \
             self.descriptor_length = self.struct.unpack(data[:self.struct.size])
+        self.desc_str = ""
 
     def __str__(self):
         return f"HID  ID: {strbcd(self.hid)} Country Code: {self.country_code}" \
                f" Descriptors: {self.num_descriptors} Type: {self.descriptor_type}" \
-               f" Descriptor Length: {self.descriptor_length}"
+               f" Descriptor Length: {self.descriptor_length}{self.desc_str}"
 
 class Endpoint:
     address : int
@@ -232,6 +451,9 @@ class Interface:
     def set_hid_report(self, data):
         self.hid.decode_desc(data)
 
+    def get_hid_report(self):
+        return self.hid
+
     def interrupt(self, urb):
         if self.interface_class == self.CLASS_HID:
             self.endpoints[urb.get_endpoint()].interrupt(urb)
@@ -321,6 +543,9 @@ class Configuration:
 
     def set_hid_report(self, interface, data):
         self.interfaces[interface].set_hid_report(data)
+
+    def get_hid_report(self, interface):
+        return self.interfaces[interface].get_hid_report()
 
     def interrupt(self, urb):
         for iface in self.interfaces:
@@ -426,6 +651,9 @@ class Device:
 
     def set_hid_report(self, interface, data):
         self.configurations[self.configuration].set_hid_report(interface, data)
+
+    def get_hid_report(self, interface):
+        return self.configurations[self.configuration].get_hid_report(interface)
 
     def interrupt(self, urb, prev):
         if urb.direction() == URB.ENDPOINT_DIR_IN:
@@ -850,6 +1078,7 @@ class URB:
                                 match prev.extra.get_desc_value():
                                     case SetupURB.DESCRIPTOR_HID:
                                         devmap[self.dev_map].set_hid_report(prev.extra.get_desc_index(), self.data)
+
             case self.XFER_TYPE_INTERRUPT:
                 self.result = devmap[self.dev_map].interrupt(self, prev)
 
@@ -907,13 +1136,15 @@ class URB:
                             case SetupURB.MATCH_REQUEST_GET_INTERFACE_DESCRIPTOR:
                                 match prev.extra.get_desc_value():
                                     case SetupURB.DESCRIPTOR_HID:
-                                        return f"{self.str_endpoint()} HID Report Response"
+                                        return f"{self.str_endpoint()} HID Report Response  " \
+                                               f"{devmap[self.dev_map].get_hid_report(prev.extra.get_desc_index())}"
+
                 return f"{self.str_endpoint()} Unsupported Control Response"
             case self.XFER_TYPE_INTERRUPT:
                 return f"{self.str_endpoint()} {self.result}"
         return f"{self.str_endpoint()} Interpretation Unimplemented"
 
-def decode(infile, verbose):
+def decode(infile, verbose, count):
     scanner = pcapng.FileScanner(infile)
     urb = None
     for block in scanner:
@@ -947,6 +1178,9 @@ def decode(infile, verbose):
             print("Unhandled block type")
             print(block)
             break
+        count -= 1
+        if count == 0:
+            break
 
 def usage():
     print(f"USAGE: {sys.argv[0]} <pcapng-file>\n\n" \
@@ -965,4 +1199,4 @@ if __name__ == '__main__':
         if len(sys.argv) > 2 and sys.argv[2].lower() == "verbose":
             verbose = True
         with open(sys.argv[1], 'rb') as infile:
-            decode(infile, verbose)
+            decode(infile, verbose, 100)
