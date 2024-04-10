@@ -178,63 +178,68 @@ class HID:
 
     ITEM_USAGE_GENERIC_DESKTOP_POINTER = 0x0001
     ITEM_USAGE_GENERIC_DESKTOP_MOUSE = 0x0002
+    ITEM_USAGE_GENERIC_DESKTOP_KEYBOARD = 0x0006
     ITEM_USAGE_GENERIC_DESKTOP_X_AXIS = 0x0030
     ITEM_USAGE_GENERIC_DESKTOP_Y_AXIS = 0x0031
     ITEM_USAGE_GENERIC_DESKTOP_WHEEL = 0x0038
+    ITEM_USAGE_GENERIC_SYSTEM_CONTROL = 0x0080
+    ITEM_USAGE_GENERIC_SYSTEM_POWER_DOWN = 0x0081
+    ITEM_USAGE_GENERIC_SYSTEM_SLEEP = 0x0082
+    ITEM_USAGE_GENERIC_SYSTEM_WAKE_UP = 0x0083
 
+    ITEM_USAGE_CONSUMER_CONTROL = 0x0001
+    ITEM_USAGE_CONSUMER_EJECT = 0x00B8
     ITEM_USAGE_CONSUMER_PAN = 0x0238
+
+    ITEM_USAGE_BARCODE_BADGE_READER = 0x0001
+    ITEM_USAGE_BARCODE_SCANNER = 0x0002
+    ITEM_USAGE_BARCODE_DUMB_SCANNER = 0x0003
 
     # I guess python really does suck
     # specify endianness to ignore alignment?
     struct = struct.Struct("<BBHBBBH")
 
-    def str_main_flags(data, input_item):
-        if len(data) == 0:
-            data = (0,)
-        if data[0] & HID.ITEM_MAIN_FLAG_CONSTANT:
+    def str_main_flags(value, input_item):
+        if value & HID.ITEM_MAIN_FLAG_CONSTANT:
             ret = "Constant"
         else:
             ret = "Data"
-        if data[0] & HID.ITEM_MAIN_FLAG_VARIABLE:
+        if value & HID.ITEM_MAIN_FLAG_VARIABLE:
             ret += ":Variable"
         else:
-            ret += ":Data"
-        if data[0] & HID.ITEM_MAIN_FLAG_RELATIVE:
+            ret += ":Array"
+        if value & HID.ITEM_MAIN_FLAG_RELATIVE:
             ret += ":Relative"
         else:
             ret += ":Absolute"
-        if data[0] & HID.ITEM_MAIN_FLAG_WRAP:
+        if value & HID.ITEM_MAIN_FLAG_WRAP:
             ret += ":Wrap"
         else:
             ret += ":No-Wrap"
-        if data[0] & HID.ITEM_MAIN_FLAG_NON_LINEAR:
+        if value & HID.ITEM_MAIN_FLAG_NON_LINEAR:
             ret += ":Non-Linear"
         else:
             ret += ":Linear"
-        if data[0] & HID.ITEM_MAIN_FLAG_NO_PREFERRED:
+        if value & HID.ITEM_MAIN_FLAG_NO_PREFERRED:
             ret += ":No-Preferred-State"
         else:
             ret += ":Preferred-State"
-        if data[0] & HID.ITEM_MAIN_FLAG_NULL_STATE:
+        if value & HID.ITEM_MAIN_FLAG_NULL_STATE:
             ret += ":Null-State"
         else:
             ret += ":No-Null-State"
         if not input_item:
-            if data[0] & HID.ITEM_MAIN_FLAG_VOLATILE:
+            if value & HID.ITEM_MAIN_FLAG_VOLATILE:
                 ret += ":Volatile"
             else:
                 ret += ":Non-Volatile"
-        if len(data) > 1:
-            if data[0] & HID.ITEM_MAIN_FLAG_BUFFERED_BYTES:
-                ret += ":Buffered-Bytes"
-            else:
-                ret += ":Bit-Field"
+        if value & HID.ITEM_MAIN_FLAG_BUFFERED_BYTES:
+            ret += ":Buffered-Bytes"
+        else:
+            ret += ":Bit-Field"
         return ret
 
-    def str_collection_type(data):
-        value = 0
-        if len(data) > 0:
-            value = data[0]
+    def str_collection_type(value):
         if value >= HID.ITEM_COLLECTION_TYPE_VENDOR:
             return "Vendor-Defined"
         match value:
@@ -255,7 +260,7 @@ class HID:
         return "Unknown"
 
     # default values are 0
-    def str_data_uint(data, high_16=False):
+    def data_uint(data, high_16=False):
         value = 0
         for pos in range(len(data)):
             value |= data[pos] << (pos * 8)
@@ -263,7 +268,7 @@ class HID:
             value <<= 16
         return value
 
-    def str_data_sint(data):
+    def data_sint(data):
         match len(data):
             case 0:
                 return 0
@@ -282,16 +287,30 @@ class HID:
             case HID.ITEM_USAGE_PAGE_GENERIC_DESKTOP:
                 ret = "Generic-Desktop"
                 match value & HID.ITEM_USAGE_MASK:
+                    case 0:
+                        pass
                     case HID.ITEM_USAGE_GENERIC_DESKTOP_POINTER:
                         ret += "/Pointer"
                     case HID.ITEM_USAGE_GENERIC_DESKTOP_MOUSE:
                         ret += "/Mouse"
+                    case HID.ITEM_USAGE_GENERIC_DESKTOP_KEYBOARD:
+                        ret += "/Keyboard"
                     case HID.ITEM_USAGE_GENERIC_DESKTOP_X_AXIS:
                         ret += "/X-Axis"
                     case HID.ITEM_USAGE_GENERIC_DESKTOP_Y_AXIS:
                         ret += "/Y-Axis"
                     case HID.ITEM_USAGE_GENERIC_DESKTOP_WHEEL:
                         ret += "/Wheel"
+                    case HID.ITEM_USAGE_GENERIC_SYSTEM_CONTROL:
+                        ret += "/System-Control"
+                    case HID.ITEM_USAGE_GENERIC_SYSTEM_POWER_DOWN:
+                        ret += "/Power-Down"
+                    case HID.ITEM_USAGE_GENERIC_SYSTEM_SLEEP:
+                        ret += "/Sleep"
+                    case HID.ITEM_USAGE_GENERIC_SYSTEM_WAKE_UP:
+                        ret += "/Wake-Up"
+                    case _:
+                        ret += "/Unknown"
                 return ret
             case HID.ITEM_USAGE_PAGE_GENERIC_DEVICE_CONTROLS:
                 return "Generic-Device-Controls"
@@ -304,17 +323,61 @@ class HID:
             case HID.ITEM_USAGE_PAGE_CONSUMER:
                 ret = "Consumer"
                 match value & HID.ITEM_USAGE_MASK:
+                    case 0:
+                        pass
+                    case HID.ITEM_USAGE_CONSUMER_CONTROL:
+                        ret += "/Control"
+                    case HID.ITEM_USAGE_CONSUMER_EJECT:
+                        ret += "/Eject"
                     case HID.ITEM_USAGE_CONSUMER_PAN:
                         ret += "/Application-Control-Pan"
+                    case _:
+                        ret += "/Unknown"
                 return ret
             case HID.ITEM_USAGE_PAGE_UNICODE:
                 return "Unicode"
             case HID.ITEM_USAGE_PAGE_BARCODE_SCANNER:
-                return "Barcode-Scanner"
-        return "Unknown"
+                ret = "Barcode-Scanner"
+                match value & HID.ITEM_USAGE_MASK:
+                    case 0:
+                        pass
+                    case HID.ITEM_USAGE_BARCODE_BADGE_READER:
+                        ret += "/Badge-Reader"
+                    case HID.ITEM_USAGE_BARCODE_SCANNER:
+                        ret += "/Scanner"
+                    case HID.ITEM_USAGE_BARCODE_DUMB_SCANNER:
+                        ret += "/Dumb-Scanner"
+                    case _:
+                        ret += "/Unknown"
+                return ret
 
     def decode_desc(self, data):
         usage_page = 0
+        logical_minimum = 0
+        logical_maximum = 0
+        physical_minimum = 0
+        physical_maximum = 0
+        unit_exponent = 0
+        unit = 0
+        report_size = 0
+        report_id = 0
+        report_count = 0
+
+        usage_list = [0]
+        usage_minimum = 0
+        usage_maximum = 0
+        designator_list = [0]
+        designator_minimum = 0
+        designator_maximum = 0
+        string_list = [0]
+        string_minimum = 0
+        string_maximum = 0
+
+        stack = []
+
+        descriptors = []
+
+        collections = [descriptors]
 
         pos = 0
         padding = " "
@@ -326,6 +389,7 @@ class HID:
                 pos += size + self.ITEM_LONG_HDR_SIZE
             else:
                 size = self.ITEM_SIZE[data[pos] & self.ITEM_SIZE_MASK]
+                type_str = "Unknown"
                 tag_str = "Unknown"
                 data_str = ""
                 match data[pos] & self.ITEM_TYPE_MASK:
@@ -334,56 +398,75 @@ class HID:
                         match data[pos] & self.ITEM_TAG_MASK:
                             case self.ITEM_MAIN_INPUT:
                                 tag_str = "Input"
-                                data_str = HID.str_main_flags(data[pos+1:pos+1+size], True)
+                                flags = HID.data_uint(data[pos+1:pos+1+size])
+                                collections[-1].append((report_id, flags, report_size, report_count))
+                                data_str = HID.str_main_flags(flags, True)
                             case self.ITEM_MAIN_OUTPUT:
                                 tag_str = "Output"
-                                data_str = HID.str_main_flags(data[pos+1:pos+1+size], False)
+                                flags = HID.data_uint(data[pos+1:pos+1+size])
+                                data_str = HID.str_main_flags(flags, False)
                             case self.ITEM_MAIN_FEATURE:
                                 tag_str = "Feature"
-                                data_str = HID.str_main_flags(data[pos+1:pos+1+size], False)
+                                flags = HID.data_uint(data[pos+1:pos+1+size])
+                                data_str = HID.str_main_flags(flags, False)
                             case self.ITEM_MAIN_COLLECTION:
                                 tag_str = "Collection"
-                                data_str = HID.str_collection_type(data[pos+1:pos+1+size])
+                                flags = HID.data_uint(data[pos+1:pos+1+size])
+                                collections.append([flags])
+                                collections[-2].append(collections[-1])
+                                data_str = HID.str_collection_type(flags)
                                 pad_change = 1
                             case self.ITEM_MAIN_END_COLLECTION:
                                 tag_str = "End-Collection"
+                                collections = collections[:-1]
                                 pad_change = -1
                     case self.ITEM_TYPE_GLOBAL:
                         type_str = "Global"
                         match data[pos] & self.ITEM_TAG_MASK:
                             case self.ITEM_GLOBAL_USAGE_PAGE:
                                 tag_str = "Usage-Page"
-                                usage_page = HID.str_data_uint(data[pos+1:pos+1+size], True)
+                                usage_page = HID.data_uint(data[pos+1:pos+1+size], True)
+                                usage_list = [usage_page]
                                 data_str = f"{usage_page:08X} {HID.str_usage(usage_page)}"
+                                # later usage values will overwrite at least the lower 16 bits
                                 usage_page &= self.ITEM_USAGE_PAGE_MASK
                             case self.ITEM_GLOBAL_LOGICAL_MINIMUM:
                                 tag_str = "Logical-Minimum"
-                                data_str = HID.str_data_sint(data[pos+1:pos+1+size])
+                                logical_minimum = HID.data_sint(data[pos+1:pos+1+size])
+                                data_str = logical_minimum
                             case self.ITEM_GLOBAL_LOGICAL_MAXIMUM:
                                 tag_str = "Logical-Maximum"
-                                data_str = HID.str_data_sint(data[pos+1:pos+1+size])
+                                logical_maximum = HID.data_sint(data[pos+1:pos+1+size])
+                                data_str = logical_maximum
                             case self.ITEM_GLOBAL_PHYSICAL_MINIMUM:
                                 tag_str = "Physical-Minimum"
-                                data_str = HID.str_data_sint(data[pos+1:pos+1+size])
+                                physical_minimum = HID.data_sint(data[pos+1:pos+1+size])
+                                data_str = physical_minimum
                             case self.ITEM_GLOBAL_PHYSICAL_MAXIMUM:
                                 tag_str = "Physical-Maximum"
-                                data_str = HID.str_data_sint(data[pos+1:pos+1+size])
+                                physical_maximum = HID.data_sint(data[pos+1:pos+1+size])
+                                data_str = physical_maximum
                             case self.ITEM_GLOBAL_UNIT_EXPONENT:
                                 tag_str = "Unit-Exponent"
-                                data_str = f"*10^{HID.str_data_sint(data[pos+1:pos+1+size])}"
+                                unit_exponent = HID.data_sint(data[pos+1:pos+1+size])
+                                data_str = f"*10^{unit_exponent}"
                             case self.ITEM_GLOBAL_UNIT:
                                 tag_str = "Unit"
+                                unit = HID.data_sint(data[pos+1:pos+1+size])
                                 # not likely going to try...
-                                data_str = f"{HID.str_data_sint(data[pos+1:pos+1+size]):08X}"
+                                data_str = f"{unit:08X}"
                             case self.ITEM_GLOBAL_REPORT_SIZE:
                                 tag_str = "Report-Size"
-                                data_str = HID.str_data_uint(data[pos+1:pos+1+size])
+                                report_size = HID.data_uint(data[pos+1:pos+1+size])
+                                data_str = report_size
                             case self.ITEM_GLOBAL_REPORT_ID:
                                 tag_str = "Report-ID"
-                                data_str = HID.str_data_uint(data[pos+1:pos+1+size])
+                                report_id = HID.data_uint(data[pos+1:pos+1+size])
+                                data_str = report_id
                             case self.ITEM_GLOBAL_REPORT_COUNT:
                                 tag_str = "Report-Count"
-                                data_str = HID.str_data_uint(data[pos+1:pos+1+size])
+                                report_count = HID.data_uint(data[pos+1:pos+1+size])
+                                data_str = report_count
                             case self.ITEM_GLOBAL_PUSH:
                                 tag_str = "Push"
                             case self.ITEM_GLOBAL_POP:
@@ -393,38 +476,38 @@ class HID:
                         match data[pos] & self.ITEM_TAG_MASK:
                             case self.ITEM_LOCAL_USAGE:
                                 tag_str = "Usage"
-                                usage = HID.str_data_uint(data[pos+1:pos+1+size])
+                                usage = HID.data_uint(data[pos+1:pos+1+size])
                                 if usage <= self.ITEM_USAGE_MASK:
                                     usage |= usage_page
                                 data_str = f"{usage:08X} {HID.str_usage(usage)}"
                             case self.ITEM_LOCAL_USAGE_MINIMUM:
                                 tag_str = "Usage-Minimum"
-                                data_str = HID.str_data_uint(data[pos+1:pos+1+size])
+                                data_str = HID.data_uint(data[pos+1:pos+1+size])
                             case self.ITEM_LOCAL_USAGE_MAXIMUM:
                                 tag_str = "Usage-Maximum"
-                                data_str = HID.str_data_uint(data[pos+1:pos+1+size])
+                                data_str = HID.data_uint(data[pos+1:pos+1+size])
                             case self.ITEM_LOCAL_DESIGNATOR_INDEX:
                                 tag_str = "Designator-Index"
-                                data_str = HID.str_data_uint(data[pos+1:pos+1+size])
+                                data_str = HID.data_uint(data[pos+1:pos+1+size])
                             case self.ITEM_LOCAL_DESIGNATOR_MINIMUM:
                                 tag_str = "Designator-Minimum"
-                                data_str = HID.str_data_uint(data[pos+1:pos+1+size])
+                                data_str = HID.data_uint(data[pos+1:pos+1+size])
                             case self.ITEM_LOCAL_DESIGNATOR_MAXIMUM:
                                 tag_str = "Designator-Maximum"
-                                data_str = HID.str_data_uint(data[pos+1:pos+1+size])
+                                data_str = HID.data_uint(data[pos+1:pos+1+size])
                             case self.ITEM_LOCAL_STRING_INDEX:
                                 tag_str = "String-Index"
-                                data_str = HID.str_data_uint(data[pos+1:pos+1+size])
+                                data_str = HID.data_uint(data[pos+1:pos+1+size])
                             case self.ITEM_LOCAL_STRING_MINIMUM:
                                 tag_str = "String-Minimum"
-                                data_str = HID.str_data_uint(data[pos+1:pos+1+size])
+                                data_str = HID.data_uint(data[pos+1:pos+1+size])
                             case self.ITEM_LOCAL_STRING_MAXIMUM:
                                 tag_str = "String-Maximum"
-                                data_str = HID.str_data_uint(data[pos+1:pos+1+size])
+                                data_str = HID.data_uint(data[pos+1:pos+1+size])
                             case self.ITEM_LOCAL_DELIMITER:
                                 tag_str = "Delimiter"
                                 data_str = "Closed-Set"
-                                if HID.str_data_uint(data[pos+1:pos+1+size]):
+                                if HID.data_uint(data[pos+1:pos+1+size]):
                                     data_str = "Open-Set"
                     case self.ITEM_TYPE_RESERVED:
                         type_str = "Reserved"
@@ -434,11 +517,13 @@ class HID:
                 if pad_change > 0:
                     padding += " "
                 pos += size + self.ITEM_SHORT_HDR_SIZE
+        print(descriptors)
 
     def __init__(self, data):
         length, desc, self.hid, self.country_code, self.num_descriptors, self.descriptor_type, \
             self.descriptor_length = self.struct.unpack(data[:self.struct.size])
         self.desc_str = ""
+        self.reports = {}
 
     def __str__(self):
         return f"HID  ID: {strbcd(self.hid)} Country Code: {self.country_code}" \
@@ -1187,7 +1272,7 @@ class URB:
                             case SetupURB.MATCH_REQUEST_GET_INTERFACE_DESCRIPTOR:
                                 match prev.extra.get_desc_value():
                                     case SetupURB.DESCRIPTOR_HID:
-                                        devmap[self.dev_map].set_hid_report(prev.extra.get_desc_index(), self.data)
+                                        devmap[self.dev_map].set_hid_report(prev.extra.wIndex, self.data)
 
             case self.XFER_TYPE_INTERRUPT:
                 self.result = devmap[self.dev_map].interrupt(self, prev)
@@ -1247,7 +1332,7 @@ class URB:
                                 match prev.extra.get_desc_value():
                                     case SetupURB.DESCRIPTOR_HID:
                                         return f"{self.str_endpoint()} HID Report Response  " \
-                                               f"{devmap[self.dev_map].get_hid_report(prev.extra.get_desc_index())}"
+                                               f"{devmap[self.dev_map].get_hid_report(prev.extra.wIndex)}"
 
                 return f"{self.str_endpoint()} Unsupported Control Response"
             case self.XFER_TYPE_INTERRUPT:
