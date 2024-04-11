@@ -93,6 +93,57 @@ class DevMap:
     bus : int
     device : int
 
+class HIDCollection:
+    flag : int
+    usage : int
+
+    def __init__(self, flag=-1, usage=0):
+        self.flag = flag
+        self.usage = usage
+        self.items = []
+
+    def append(self, item):
+        self.items.append(item)
+
+    def __str__(self):
+        ret = "("
+        if self.flag >= 0:
+            ret = f"{HID.str_collection_type(self.flag)}/{HID.str_usage(self.usage)}("
+        for num, item in enumerate(self.items):
+            ret += str(item)
+            if num < len(self.items)-1:
+                ret += ", "
+        ret += ")"
+        return ret
+
+@dataclass
+class HIDIOItem:
+    output : bool
+    report_id : int
+    flags : int
+    usage : int
+    size : int
+    count : int
+
+    def __str__(self):
+        direction = "Input"
+        if self.output:
+            direction = "Output"
+        flag_str = "Padding"
+        usage_str = ""
+        if not self.flags & HID.ITEM_MAIN_FLAG_CONSTANT:
+            flag_str = "Data"
+            if isinstance(self.usage, range):
+                usage_str = f"[{self.usage.start}-{self.usage.stop}]"
+            else:
+                usage_str = "["
+                for num, usage in enumerate(self.usage):
+                    usage_str += HID.str_usage(usage)
+                    if num < len(self.usage)-1:
+                        usage_str += ", "
+                usage_str += "]"
+        return f"{direction} ID:{self.report_id} {flag_str}{usage_str} {self.size}bit x{self.count}"
+
 class HID:
     hid : int
     country_code : int
@@ -350,6 +401,7 @@ class HID:
                     case _:
                         ret += "/Unknown"
                 return ret
+        return "Unknown"
 
     def decode_desc(self, data):
         usage_page = 0
@@ -363,21 +415,19 @@ class HID:
         report_id = 0
         report_count = 0
 
-        usage_list = [0]
+        usage_list = []
         usage_minimum = 0
         usage_maximum = 0
-        designator_list = [0]
+        designator_list = []
         designator_minimum = 0
         designator_maximum = 0
-        string_list = [0]
+        string_list = []
         string_minimum = 0
         string_maximum = 0
 
         stack = []
 
-        descriptors = []
-
-        collections = [descriptors]
+        collections = [self.descriptors]
 
         pos = 0
         padding = " "
@@ -399,21 +449,58 @@ class HID:
                             case self.ITEM_MAIN_INPUT:
                                 tag_str = "Input"
                                 flags = HID.data_uint(data[pos+1:pos+1+size])
-                                collections[-1].append((report_id, flags, report_size, report_count))
+                                # not 100% on this
+                                collection_usage = usage_list
+                                if len(usage_list) == 0:
+                                    collection_usage = range(usage_minimum, usage_maximum)
+                                collections[-1].append(HIDIOItem(False, report_id, flags, collection_usage, report_size, report_count))
+                                # not 100% on this either but "locals" seem to reset?
+                                usage_list = []
+                                usage_minimum = 0
+                                usage_maximum = 0
+                                designator_list = []
+                                designator_minimum = 0
+                                designator_maximum = 0
+                                string_list = []
+                                string_minimum = 0
+                                string_maximum = 0
                                 data_str = HID.str_main_flags(flags, True)
                             case self.ITEM_MAIN_OUTPUT:
                                 tag_str = "Output"
                                 flags = HID.data_uint(data[pos+1:pos+1+size])
+                                collection_usage = usage_list
+                                if len(usage_list) == 0:
+                                    collection_usage = range(usage_minimum, usage_maximum)
+                                collections[-1].append(HIDIOItem(False, report_id, flags, collection_usage, report_size, report_count))
+                                usage_list = []
+                                usage_minimum = 0
+                                usage_maximum = 0
+                                designator_list = []
+                                designator_minimum = 0
+                                designator_maximum = 0
+                                string_list = []
+                                string_minimum = 0
+                                string_maximum = 0
                                 data_str = HID.str_main_flags(flags, False)
                             case self.ITEM_MAIN_FEATURE:
                                 tag_str = "Feature"
+                                # not implemented
                                 flags = HID.data_uint(data[pos+1:pos+1+size])
                                 data_str = HID.str_main_flags(flags, False)
                             case self.ITEM_MAIN_COLLECTION:
                                 tag_str = "Collection"
                                 flags = HID.data_uint(data[pos+1:pos+1+size])
-                                collections.append([flags])
+                                collections.append(HIDCollection(flags, usage))
                                 collections[-2].append(collections[-1])
+                                usage_list = []
+                                usage_minimum = 0
+                                usage_maximum = 0
+                                designator_list = []
+                                designator_minimum = 0
+                                designator_maximum = 0
+                                string_list = []
+                                string_minimum = 0
+                                string_maximum = 0
                                 data_str = HID.str_collection_type(flags)
                                 pad_change = 1
                             case self.ITEM_MAIN_END_COLLECTION:
@@ -426,7 +513,6 @@ class HID:
                             case self.ITEM_GLOBAL_USAGE_PAGE:
                                 tag_str = "Usage-Page"
                                 usage_page = HID.data_uint(data[pos+1:pos+1+size], True)
-                                usage_list = [usage_page]
                                 data_str = f"{usage_page:08X} {HID.str_usage(usage_page)}"
                                 # later usage values will overwrite at least the lower 16 bits
                                 usage_page &= self.ITEM_USAGE_PAGE_MASK
@@ -468,9 +554,16 @@ class HID:
                                 report_count = HID.data_uint(data[pos+1:pos+1+size])
                                 data_str = report_count
                             case self.ITEM_GLOBAL_PUSH:
+                                # not confident this is how these work!
                                 tag_str = "Push"
+                                stack.append(usage_page, logical_minimum, logical_maximum,
+                                             physical_minimum, physical_maximum, unit_exponent,
+                                             unit, report_size, report_id, report_count)
                             case self.ITEM_GLOBAL_POP:
                                 tag_str = "Pop"
+                                usage_page, logical_minimum, logical_maximum, physical_minimum, \
+                                    physical_maximum, unit_exponent, unit, report_size, \
+                                    report_id, report_count = stack.pop()
                     case self.ITEM_TYPE_LOCAL:
                         type_str = "Local"
                         match data[pos] & self.ITEM_TAG_MASK:
@@ -479,32 +572,44 @@ class HID:
                                 usage = HID.data_uint(data[pos+1:pos+1+size])
                                 if usage <= self.ITEM_USAGE_MASK:
                                     usage |= usage_page
+                                usage_list.append(usage)
                                 data_str = f"{usage:08X} {HID.str_usage(usage)}"
                             case self.ITEM_LOCAL_USAGE_MINIMUM:
                                 tag_str = "Usage-Minimum"
-                                data_str = HID.data_uint(data[pos+1:pos+1+size])
+                                usage_minimum = HID.data_uint(data[pos+1:pos+1+size])
+                                data_str = usage_minimum
                             case self.ITEM_LOCAL_USAGE_MAXIMUM:
                                 tag_str = "Usage-Maximum"
-                                data_str = HID.data_uint(data[pos+1:pos+1+size])
+                                usage_maximum = HID.data_uint(data[pos+1:pos+1+size])
+                                data_str = usage_maximum
                             case self.ITEM_LOCAL_DESIGNATOR_INDEX:
+                                # not implemented (no examples)
                                 tag_str = "Designator-Index"
-                                data_str = HID.data_uint(data[pos+1:pos+1+size])
+                                designator_index = HID.data_uint(data[pos+1:pos+1+size])
+                                data_str = designator_index
                             case self.ITEM_LOCAL_DESIGNATOR_MINIMUM:
                                 tag_str = "Designator-Minimum"
-                                data_str = HID.data_uint(data[pos+1:pos+1+size])
+                                designator_minimum = HID.data_uint(data[pos+1:pos+1+size])
+                                data_str = designator_minimum
                             case self.ITEM_LOCAL_DESIGNATOR_MAXIMUM:
                                 tag_str = "Designator-Maximum"
-                                data_str = HID.data_uint(data[pos+1:pos+1+size])
+                                designator_maximum = HID.data_uint(data[pos+1:pos+1+size])
+                                data_str = designator_maximum
                             case self.ITEM_LOCAL_STRING_INDEX:
+                                # same
                                 tag_str = "String-Index"
-                                data_str = HID.data_uint(data[pos+1:pos+1+size])
+                                string_index = HID.data_uint(data[pos+1:pos+1+size])
+                                data_str = string_index
                             case self.ITEM_LOCAL_STRING_MINIMUM:
                                 tag_str = "String-Minimum"
-                                data_str = HID.data_uint(data[pos+1:pos+1+size])
+                                string_minimum = HID.data_uint(data[pos+1:pos+1+size])
+                                data_str = string_minimum
                             case self.ITEM_LOCAL_STRING_MAXIMUM:
                                 tag_str = "String-Maximum"
-                                data_str = HID.data_uint(data[pos+1:pos+1+size])
+                                string_maximum = HID.data_uint(data[pos+1:pos+1+size])
+                                data_str = string_maximum
                             case self.ITEM_LOCAL_DELIMITER:
+                                # for now not implemented (not clear on how it works)
                                 tag_str = "Delimiter"
                                 data_str = "Closed-Set"
                                 if HID.data_uint(data[pos+1:pos+1+size]):
@@ -517,18 +622,28 @@ class HID:
                 if pad_change > 0:
                     padding += " "
                 pos += size + self.ITEM_SHORT_HDR_SIZE
-        print(descriptors)
+
+    def value_bits_from_data(data, bytepos, bitpos):
+        pass
+
+    def decode_interrupt(self, data, endpoint):
+        report = data[0]
+        direction = endpoint.get_direction()
+        bytepos = 1
+        bitpos = 0
+        collections = [self.descriptors]
 
     def __init__(self, data):
         length, desc, self.hid, self.country_code, self.num_descriptors, self.descriptor_type, \
             self.descriptor_length = self.struct.unpack(data[:self.struct.size])
         self.desc_str = ""
-        self.reports = {}
+        self.descriptors = HIDCollection()
 
     def __str__(self):
         return f"HID  ID: {strbcd(self.hid)} Country Code: {self.country_code}" \
                f" Descriptors: {self.num_descriptors} Type: {self.descriptor_type}" \
-               f" Descriptor Length: {self.descriptor_length}{self.desc_str}"
+               f" Descriptor Length: {self.descriptor_length}{self.desc_str}\n" \
+               f" Structure: {self.descriptors}"
 
 class Endpoint:
     address : int
@@ -566,10 +681,6 @@ class Endpoint:
 
     def get_direction(self):
         return self.address & self.ADDRESS_DIR_MASK
-
-    def interrupt(self):
-        # TODO: Interpret Interrupt/HID
-        pass
 
     def __init__(self, data):
         length, desc, self.address, self.attributes, self.max_packet_size, self.interval = \
@@ -651,7 +762,7 @@ class Interface:
 
     def interrupt(self, urb):
         if self.interface_class == self.CLASS_HID:
-            self.endpoints[urb.get_endpoint()].interrupt(urb)
+            self.hid.decode_interrupt(urb.data, self.endpoints[urb.get_endpoint()])
 
     def __init__(self, data):
         length, desc, self.interface_id, self.alternate_setting, self.num_endpoints, \
