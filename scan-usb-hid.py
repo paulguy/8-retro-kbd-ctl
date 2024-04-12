@@ -7,53 +7,10 @@ import struct
 import errno
 import array
 
-# not device interfaces, capture interfaces
-interfaces = []
-# present view of devices at any moment
-devmap = {}
-
-def chrbyte(char):
-    if char < ord(' ') or char > ord('~'):
-        return '.'
-    return f"{char:c}"
-
-def strbcd(val):
-    return hex(val)[2:]
+from lib.util import chrbyte, strbcd, str_hex, str_endpoint
 
 class UninterpretableDataException(Exception):
     pass
-
-def str_hex(data):
-    ret = ""
-    for i in range(0, len(data)//16*16, 16):
-        ret += f" {data[i]:02X} {data[i+1]:02X} {data[i+2]:02X} {data[i+3]:02X}" \
-               f" {data[i+4]:02X} {data[i+5]:02X} {data[i+6]:02X} {data[i+7]:02X}" \
-               f"-{data[i+8]:02X} {data[i+9]:02X} {data[i+10]:02X} {data[i+11]:02X}" \
-               f" {data[i+12]:02X} {data[i+13]:02X} {data[i+14]:02X} {data[i+15]:02X}" \
-               f"  {chrbyte(data[i])}{chrbyte(data[i+1])}{chrbyte(data[i+2])}{chrbyte(data[i+3])}" \
-               f"{chrbyte(data[i+4])}{chrbyte(data[i+5])}{chrbyte(data[i+6])}{chrbyte(data[i+7])}" \
-               f" {chrbyte(data[i+8])}{chrbyte(data[i+9])}{chrbyte(data[i+10])}{chrbyte(data[i+11])}" \
-               f"{chrbyte(data[i+12])}{chrbyte(data[i+13])}{chrbyte(data[i+14])}{chrbyte(data[i+15])}"
-        if i+16 <= len(data):
-            ret += "\n"
-    if len(data) % 16 != 0:
-        ret += " "
-        start = len(data) // 16 * 16
-        for num in range(start, start+16):
-            if num < len(data):
-                ret += f"{data[num]:02X}"
-            else:
-                ret += "  "
-            if num % 16 == 7:
-                ret += "-"
-            else:
-                ret += " "
-        ret += " "
-        for num in range(start, len(data)):
-            ret += chrbyte(data[num])
-            if num % 16 == 7:
-                ret += " "
-    return ret
 
 def get_better_string(orig, new):
     # if the new string is a truncated version of the original
@@ -62,23 +19,6 @@ def get_better_string(orig, new):
         return False, orig
     # otherwise, apply the new string
     return True, new
-
-def str_endpoint(busnum, devnum, endpoint):
-    return f"{busnum}.{devnum}.{endpoint}"
-
-def add_new_device(dev, dev_map):
-    devmap[dev_map] = dev
-
-def decode_string_desc(data):
-    # don't need the length nor desc type
-    return data[2:].decode('utf-16')
-
-def decode_language_list(data):
-    languages = []
-    # don't need the length nor desc type
-    for i in range(2, len(data), 2):
-        languages.append(data[i] | (data[i+1] << 8))
-    return languages
 
 @dataclass
 class HwInterface:
@@ -1433,10 +1373,22 @@ class URB:
             return False
         return True
 
-    def __init__(self, data, prev, verbose):
+    def decode_string_desc(data):
+        # don't need the length nor desc type
+        return data[2:].decode('utf-16')
+
+    def decode_language_list(data):
+        languages = []
+        # don't need the length nor desc type
+        for i in range(2, len(data), 2):
+            languages.append(data[i] | (data[i+1] << 8))
+        return languages
+
+    def __init__(self, devmap, data, prev, verbose):
         self.prev = None
         self.extra = None
         self.data = None
+        self.devmap = devmap
         self.rawdata = data
         # get beginning
         self.urb_id, self.urb_type, self.xfer_type, self.epnum, self.devnum, self.busnum, \
@@ -1498,18 +1450,18 @@ class URB:
                                                 if verbose:
                                                     print(f"{self.str_endpoint()} Ignoring same device in {self.dev_map.bus}.{self.dev_map.device}: {self.new_dev}")
                                             else:
-                                                add_new_device(self.new_dev, self.dev_map)
+                                                devmap[self.dev_map] = self.new_dev
                                                 if verbose:
                                                     print(f"{self.str_endpoint()} Replacement in {self.dev_map.bus}.{self.dev_map.device}: {self.new_dev}")
                                         else:
-                                            add_new_device(self.new_dev, self.dev_map)
+                                            devmap[self.dev_map] = self.new_dev
                                     case SetupURB.DESCRIPTOR_CONFIGURATION:
                                         self.new_config = Configuration(self.data)
                                         devmap[self.dev_map].add_configuration(self.new_config)
                                     case SetupURB.DESCRIPTOR_STRING:
                                         index = prev.extra.get_desc_index()
                                         if index != 0:
-                                            self.new_str = decode_string_desc(self.data)
+                                            self.new_str = URB.decode_string_desc(self.data)
                                             used = devmap[self.dev_map].set_string(index, self.new_str)
                                             if verbose and not used:
                                                 print(f"{self.str_endpoint()} String \"{self.new_str}\" Not Used")
@@ -1543,7 +1495,7 @@ class URB:
             else:
                 return f"{self.str_endpoint()} Error {-self.status} {errno.errorcode[-self.status]}"
 
-        if self.dev_map not in devmap:
+        if self.dev_map not in self.devmap:
             # device doesn't exist
             if self.xfer_type == self.XFER_TYPE_CONTROL:
                 if self.flag_setup == self.FLAG_SETUP:
@@ -1585,7 +1537,7 @@ class URB:
                                             index = prev.extra.get_desc_index()
                                             if index == 0:
                                                 ret = f"{self.str_endpoint()} String Languages Record:"
-                                                for language in decode_language_list(self.data):
+                                                for language in URB.decode_language_list(self.data):
                                                     ret += f" {language}"
                                                 return ret
                                             return f"{self.str_endpoint()} String Response: \"{self.new_str}\""
@@ -1593,15 +1545,29 @@ class URB:
                                 match prev.extra.get_desc_value():
                                     case SetupURB.DESCRIPTOR_HID:
                                         return f"{self.str_endpoint()} HID Report Response  " \
-                                               f"{devmap[self.dev_map].get_hid_report(prev.extra.wIndex)}"
+                                               f"{self.devmap[self.dev_map].get_hid_report(prev.extra.wIndex)}"
                 return f"{self.str_endpoint()} Unsupported Control Response"
             case self.XFER_TYPE_INTERRUPT:
                 return f"{self.str_endpoint()} {self.result}"
         return f"{self.str_endpoint()} Interpretation Unimplemented"
 
-def decode(infile, verbose, count):
+class USBContext:
+    def __init__(self, verbose=False):
+        self.verbose = verbose
+        # present view of devices at any moment
+        self.devmap = {}
+        self.prev = None
+
+    def parse_urb(self, data):
+        self.prev = URB(self.devmap, data, self.prev, verbose)
+        return self.prev
+
+def _main(infile, verbose, count):
+    # not device interfaces, capture interfaces
+    interfaces = []
+
     scanner = pcapng.FileScanner(infile)
-    urb = None
+    ctx = USBContext(verbose)
     num = 1
     for block in scanner:
         if isinstance(block, pcapng.blocks.SectionHeader):
@@ -1621,7 +1587,7 @@ def decode(infile, verbose, count):
                     print("Incomplete packet!")
             #print(str_hex(block.packet_data))
             try:
-                urb = URB(block.packet_data, urb, verbose)
+                urb = ctx.parse_urb(block.packet_data)
                 if verbose:
                     print(urb)
                 print(f"{num} {urb.decode()}")
@@ -1657,4 +1623,4 @@ if __name__ == '__main__':
         if len(sys.argv) > 2 and sys.argv[2].lower() == "verbose":
             verbose = True
         with open(sys.argv[1], 'rb') as infile:
-            decode(infile, verbose, -1)
+            _main(infile, verbose, -1)
