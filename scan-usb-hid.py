@@ -9,8 +9,6 @@ import array
 
 # not device interfaces, capture interfaces
 interfaces = []
-# any seen devices
-devices = []
 # present view of devices at any moment
 devmap = {}
 
@@ -69,8 +67,7 @@ def str_endpoint(busnum, devnum, endpoint):
     return f"{busnum}.{devnum}.{endpoint}"
 
 def add_new_device(dev, dev_map):
-    devices.append(dev)
-    devmap[dev_map] = devices[-1]
+    devmap[dev_map] = dev
 
 def decode_string_desc(data):
     # don't need the length nor desc type
@@ -116,9 +113,15 @@ class HIDCollection:
         ret += ")"
         return ret
 
+    def __iter__(self):
+        return iter(self.items)
+
+    def __len__(self):
+        return len(self.items)
+
 @dataclass
 class HIDIOItem:
-    output : bool
+    direction : int
     report_id : int
     flags : int
     usage : int
@@ -127,7 +130,7 @@ class HIDIOItem:
 
     def __str__(self):
         direction = "Input"
-        if self.output:
+        if self.direction == Endpoint.ADDRESS_DIR_OUT:
             direction = "Output"
         flag_str = "Padding"
         usage_str = ""
@@ -453,7 +456,8 @@ class HID:
                                 collection_usage = usage_list
                                 if len(usage_list) == 0:
                                     collection_usage = range(usage_minimum, usage_maximum)
-                                collections[-1].append(HIDIOItem(False, report_id, flags, collection_usage, report_size, report_count))
+                                collections[-1].append(HIDIOItem(Endpoint.ADDRESS_DIR_IN, report_id, flags,
+                                                                 collection_usage, report_size, report_count))
                                 # not 100% on this either but "locals" seem to reset?
                                 usage_list = []
                                 usage_minimum = 0
@@ -471,7 +475,8 @@ class HID:
                                 collection_usage = usage_list
                                 if len(usage_list) == 0:
                                     collection_usage = range(usage_minimum, usage_maximum)
-                                collections[-1].append(HIDIOItem(False, report_id, flags, collection_usage, report_size, report_count))
+                                collections[-1].append(HIDIOItem(Endpoint.ADDRESS_DIR_OUT, report_id, flags,
+                                                                 collection_usage, report_size, report_count))
                                 usage_list = []
                                 usage_minimum = 0
                                 usage_maximum = 0
@@ -623,15 +628,104 @@ class HID:
                     padding += " "
                 pos += size + self.ITEM_SHORT_HDR_SIZE
 
-    def value_bits_from_data(data, bytepos, bitpos):
-        pass
+    SHIFT_MASKS_LOW = [0xFF, 0x7F, 0x3F, 0x1F, 0x0F, 0x07, 0x03, 0x01]
+    SHIFT_MASKS_HIGH = [0xFF, 0xFE, 0xFC, 0xF8, 0xF0, 0xE0, 0xC0, 0x80]
+    BIT_MASKS = [0x80, 0x40, 0x20, 0x10, 0x08, 0x04, 0x02, 0x01]
 
-    def decode_interrupt(self, data, endpoint):
-        report = data[0]
-        direction = endpoint.get_direction()
-        bytepos = 1
-        bitpos = 0
-        collections = [self.descriptors]
+    def value_bits_from_data(data, bytepos, bitpos, bits):
+        value = array.array('B')
+        byte = data[bytepos]
+
+        if bitpos > 0:
+            byte &= HID.SHIFT_MASKS_LOW[bitpos]
+            byte <<= bitpos
+
+            for i in range(bits // 8):
+                byte2 = data[bytepos+1+i]
+                byte2 >>= 8-bitpos
+
+                value.append(byte | byte2)
+
+                byte = data[bytepos+1+i]
+                byte &= HID.SHIFT_MASKS_LOW[bitpos]
+                byte <<= bitpos
+
+            if (bitpos + bits) % 8 > 0:
+                byte2 = data[bytepos+(bits // 8)]
+                byte2 >>= 8-bitpos
+            else:
+                byte2 = 0
+
+            value.append((byte | byte2) & HID.SHIFT_MASKS_HIGH[(bitpos + bits) % 8])
+        else:
+            for i in range(bits // 8):
+                value.append(data[bytepos+i])
+
+            if bits % 8 > 0:
+                byte = data[bytepos+(bits // 8)]
+                byte &= HID.SHIFT_MASKS_HIGH[bits % 8]
+
+                value.append(byte)
+
+        return value
+
+    def process_collection(data, report_id, direction, collection, bytepos, bitpos):
+        ret = "("
+        for num, report in enumerate(collection):
+            if isinstance(report, HIDCollection):
+                new_str = HID.process_collection(data, report_id, direction, report, bytepos, bitpos)
+                if new_str is not None:
+                    ret += new_str
+                    if num < len(collection) - 1:
+                        ret += " "
+            else:
+                if report.direction == direction and report.report_id == report_id:
+                    if not report.flags & HID.ITEM_MAIN_FLAG_CONSTANT:
+                        ret += "["
+                        for countnum, i in enumerate(range(report.count)):
+                            value = HID.value_bits_from_data(data, bytepos, bitpos, report.size)
+                            if report.size % 8 == 0:
+                                for bytenum, byte in enumerate(value):
+                                    ret += f"{byte:02X}"
+                                    if bytenum < len(value) - 1:
+                                        ret += " "
+                            else:
+                                for bytenum, byte in enumerate(value):
+                                    for bit in range(8):
+                                        if bytenum * 8 + bit >= report.size:
+                                            break
+                                        if byte & HID.BIT_MASKS[bit]:
+                                            ret += "1"
+                                        else:
+                                            ret += "0"
+                            if countnum < report.count - 1:
+                                ret += " "
+                            bytepos += report.size // 8
+                            bitpos += report.size % 8
+                            while bitpos >= 8:
+                                bytepos += 1
+                                bitpos -= 8
+                        ret += "]"
+                    else:
+                        bytepos += report.size * report.count // 8
+                        bitpos += report.size * report.count % 8
+                        while bitpos >= 8:
+                            bytepos += 1
+                            bitpos -= 8
+        if len(ret) == 1:
+            return None
+        ret += ")"
+        return ret
+
+    def decode_interrupt(self, endpoint, data):
+        try:
+            ret = HID.process_collection(data[1:], data[0], endpoint.get_direction(), self.descriptors, 0, 0)
+        except IndexError:
+            return f"Malformed packet! {endpoint}"
+        if ret is not None:
+            return f"HID Report {data[0]}: ({ret})"
+        else:
+            return f"Couldn't extract data from HID report! {endpoint}"
 
     def __init__(self, data):
         length, desc, self.hid, self.country_code, self.num_descriptors, self.descriptor_type, \
@@ -760,9 +854,13 @@ class Interface:
     def get_hid_report(self):
         return self.hid
 
-    def interrupt(self, urb):
+    def interrupt(self, endpoint, data):
         if self.interface_class == self.CLASS_HID:
-            self.hid.decode_interrupt(urb.data, self.endpoints[urb.get_endpoint()])
+            return self.hid.decode_interrupt(self.endpoints[endpoint], data)
+        return None
+
+    def get_endpoints(self):
+        return self.endpoints.keys()
 
     def __init__(self, data):
         length, desc, self.interface_id, self.alternate_setting, self.num_endpoints, \
@@ -828,6 +926,7 @@ class Configuration:
             self.configuration_string_id, self.attributes, self.max_power \
             = self.struct.unpack(data[:self.struct.size])
         self.interfaces = {}
+        self.endpoint_map = {}
         if len(data) >= self.total_length - URB.SIZE:
             # decode following interfaces
             pos = self.struct.size
@@ -835,6 +934,8 @@ class Configuration:
                 interface = Interface(data[pos:])
                 self.interfaces[interface.interface_id] = interface
                 pos += interface.get_size()
+                for endpoint in interface.get_endpoints():
+                    self.endpoint_map[endpoint] = interface
         self.configuration_string = ""
 
     def set_string(self, index, value):
@@ -853,10 +954,8 @@ class Configuration:
     def get_hid_report(self, interface):
         return self.interfaces[interface].get_hid_report()
 
-    def interrupt(self, urb):
-        for iface in self.interfaces:
-            if iface.interface_id == interface:
-                iface.interrupt(urb)
+    def interrupt(self, endpoint, data):
+        return self.endpoint_map[endpoint].interrupt(endpoint, data)
 
     def __str__(self):
         ret = f"Configuration  Total Length: {self.total_length} Interfaces: {self.num_interfaces}" \
@@ -970,16 +1069,24 @@ class Device:
                     return InterruptAcknowledge("In")
                 else:
                     return InterruptNoData("In")
-            return InterruptUnknown("In", urb.data)
-        else: # Out
-            if len(urb.data) == 0:
-                if prev.xfer_type == URB.XFER_TYPE_INTERRUPT and \
-                   prev.direction() == URB.ENDPOINT_DIR_OUT and \
-                   urb.urb_type == URB.URB_TYPE_COMPLETE:
-                    return InterruptAcknowledge("Out")
-                else:
-                    return InterruptNoData("Out")
-        return InterruptUnknown("Out", urb.data)
+            ret = self.configurations[self.configuration].interrupt(urb.endpoint(), urb.data)
+            if ret is None:
+                return InterruptUnknown("In", urb.data)
+            else:
+                return ret
+        # Out
+        if len(urb.data) == 0:
+            if prev.xfer_type == URB.XFER_TYPE_INTERRUPT and \
+               prev.direction() == URB.ENDPOINT_DIR_OUT and \
+               urb.urb_type == URB.URB_TYPE_COMPLETE:
+                return InterruptAcknowledge("Out")
+            else:
+                return InterruptNoData("Out")
+        ret = self.configurations[self.configuration].interrupt(urb.endpoint(), urb.data)
+        if ret is None:
+            return InterruptUnknown("Out", urb.data)
+        else:
+            return ret
 
     def __eq__(self, other):
         # I don't know the official way to compare devices, and the serial number isn't guaranteed to be known yet
@@ -1096,7 +1203,7 @@ class SetupURB:
                 return "Interface-Power"
             case self.DESCRIPTOR_ON_THE_GO:
                 return "On-The-Go"
-        return "Unknown {self.get_desc_value()}"
+        return f"Unknown {self.get_desc_value()}"
 
     def __str__(self):
         setup_direction = "Host-To-Device"
@@ -1327,6 +1434,9 @@ class URB:
         return True
 
     def __init__(self, data, prev, verbose):
+        self.prev = None
+        self.extra = None
+        self.data = None
         self.rawdata = data
         # get beginning
         self.urb_id, self.urb_type, self.xfer_type, self.epnum, self.devnum, self.busnum, \
@@ -1336,12 +1446,35 @@ class URB:
         self.interval, self.start_frame, self.xfer_flags, self.ndesc = \
             self.struct_end.unpack(data[self.struct_start.size+SetupURB.struct.size:self.struct_start.size+SetupURB.struct.size+self.struct_end.size])
 
-        self.data = data[self.SIZE:]
+        self.dev_map = DevMap(self.busnum, self.devnum)
 
         if self.is_error():
+            if -self.status == errno.ENOENT:
+                # device no longer exists
+                del devmap[self.dev_map]
             return
 
-        self.dev_map = DevMap(self.busnum, self.devnum)
+        if self.dev_map not in devmap:
+            # device doesn't exist
+            if self.xfer_type == self.XFER_TYPE_CONTROL:
+                if self.flag_setup == self.FLAG_SETUP:
+                    # check to see if it's a device descriptor request
+                    setup_urb = SetupURB(data[self.struct_start.size:])
+                    if not ((setup_urb.bmRequestType, setup_urb.bRequest) == SetupURB.MATCH_REQUEST_GET_DESCRIPTOR and \
+                            setup_urb.get_desc_value() == SetupURB.DESCRIPTOR_DEVICE):
+                        return
+                else:
+                    # check to see if it's a device descriptor response
+                    if prev.flag_setup == self.FLAG_SETUP:
+                        if prev.extra is None or \
+                           not ((prev.extra.bmRequestType, prev.extra.bRequest) == SetupURB.MATCH_REQUEST_GET_DESCRIPTOR and \
+                                prev.extra.get_desc_value() == SetupURB.DESCRIPTOR_DEVICE):
+                            return
+            else:
+                return
+
+        self.data = data[self.SIZE:]
+
         match self.xfer_type:
             case self.XFER_TYPE_CONTROL:
                 if self.flag_setup == self.FLAG_SETUP:
@@ -1384,7 +1517,6 @@ class URB:
                                 match prev.extra.get_desc_value():
                                     case SetupURB.DESCRIPTOR_HID:
                                         devmap[self.dev_map].set_hid_report(prev.extra.wIndex, self.data)
-
             case self.XFER_TYPE_INTERRUPT:
                 self.result = devmap[self.dev_map].interrupt(self, prev)
 
@@ -1400,13 +1532,31 @@ class URB:
               f"ISO Descriptors: {self.ndesc}"
         if self.flag_setup == self.FLAG_SETUP:
             ret += f", {self.extra}"
-        if len(self.data) > 0:
+        if self.data is not None and len(self.data) > 0:
             ret += f"\n{str_hex(self.data)}"
         return ret
 
     def decode(self):
         if self.is_error():
-            return f"{self.str_endpoint()} Error {-self.status} {errno.errorcode[-self.status]}"
+            if -self.status == errno.ENOENT:
+                return f"{self.str_endpoint()} Error device reported not found!  Removing."
+            else:
+                return f"{self.str_endpoint()} Error {-self.status} {errno.errorcode[-self.status]}"
+
+        if self.dev_map not in devmap:
+            # device doesn't exist
+            if self.xfer_type == self.XFER_TYPE_CONTROL:
+                if self.flag_setup == self.FLAG_SETUP:
+                    # check to see if it's a device descriptor request
+                    setup_urb = SetupURB(self.rawdata[self.struct_start.size:])
+                    if not ((setup_urb.bmRequestType, setup_urb.bRequest) == SetupURB.MATCH_REQUEST_GET_DESCRIPTOR and \
+                            setup_urb.get_desc_value() == SetupURB.DESCRIPTOR_DEVICE):
+                        return f"{self.str_endpoint()} Device not found and not a device descriptor!"
+                else:
+                    if self.prev is None:
+                        return f"{self.str_endpoint()} Device not found and not a device descriptor!"
+            else:
+                return f"{self.str_endpoint()} Device not found and not a device descriptor!"
 
         match self.xfer_type:
             case self.XFER_TYPE_CONTROL:
@@ -1444,7 +1594,6 @@ class URB:
                                     case SetupURB.DESCRIPTOR_HID:
                                         return f"{self.str_endpoint()} HID Report Response  " \
                                                f"{devmap[self.dev_map].get_hid_report(prev.extra.wIndex)}"
-
                 return f"{self.str_endpoint()} Unsupported Control Response"
             case self.XFER_TYPE_INTERRUPT:
                 return f"{self.str_endpoint()} {self.result}"
@@ -1453,6 +1602,7 @@ class URB:
 def decode(infile, verbose, count):
     scanner = pcapng.FileScanner(infile)
     urb = None
+    num = 1
     for block in scanner:
         if isinstance(block, pcapng.blocks.SectionHeader):
             print("Section Header")
@@ -1474,19 +1624,21 @@ def decode(infile, verbose, count):
                 urb = URB(block.packet_data, urb, verbose)
                 if verbose:
                     print(urb)
-                print(urb.decode())
+                print(f"{num} {urb.decode()}")
             except Exception as e:
                 print(str_hex(block.packet_data))
                 raise e
+            num += 1
         elif isinstance(block, pcapng.blocks.InterfaceStatistics):
             pass
         else:
             print("Unhandled block type")
             print(block)
             break
-        count -= 1
-        if count == 0:
-            break
+        if count >= 0:
+            count -= 1
+            if count == 0:
+                break
 
 def usage():
     print(f"USAGE: {sys.argv[0]} <pcapng-file>\n\n" \
@@ -1505,4 +1657,4 @@ if __name__ == '__main__':
         if len(sys.argv) > 2 and sys.argv[2].lower() == "verbose":
             verbose = True
         with open(sys.argv[1], 'rb') as infile:
-            decode(infile, verbose, 100)
+            decode(infile, verbose, -1)
