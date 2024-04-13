@@ -658,9 +658,16 @@ class HID:
         else:
             return f"Couldn't extract data from HID report! {endpoint}"
 
-    def __init__(self, data):
-        length, desc, self.hid, self.country_code, self.num_descriptors, self.descriptor_type, \
-            self.descriptor_length = self.struct.unpack(data[:self.struct.size])
+    def __init__(self, data=None):
+        if data is not None:
+            length, desc, self.hid, self.country_code, self.num_descriptors, self.descriptor_type, \
+                self.descriptor_length = self.struct.unpack(data[:self.struct.size])
+        else:
+            self.hid = 0
+            self.country_code = 0
+            self.num_descriptors = 0
+            self.descriptor_type = 0
+            self.descriptor_length = 0
         self.desc_str = ""
         self.descriptors = HIDCollection()
 
