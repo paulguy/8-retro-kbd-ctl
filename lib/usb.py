@@ -1386,6 +1386,7 @@ class URB:
         self.prev = None
         self.extra = None
         self.data = None
+        self.decode_str = None
         self.devmap = devmap
         self.rawdata = data
         # get beginning
@@ -1487,67 +1488,80 @@ class URB:
         return ret
 
     def decode(self):
-        if self.is_error():
-            if -self.status == errno.ENOENT:
-                return f"{self.str_endpoint()} Error device reported not found!  Removing."
-            else:
-                return f"{self.str_endpoint()} Error {-self.status} {errno.errorcode[-self.status]}"
-
-        if self.dev_map not in self.devmap:
-            # device doesn't exist
-            if self.xfer_type == self.XFER_TYPE_CONTROL:
-                if self.flag_setup == self.FLAG_SETUP:
-                    # check to see if it's a device descriptor request
-                    setup_urb = SetupURB(self.rawdata[self.struct_start.size:])
-                    if not ((setup_urb.bmRequestType, setup_urb.bRequest) == SetupURB.MATCH_REQUEST_GET_DESCRIPTOR and \
-                            setup_urb.get_desc_value() == SetupURB.DESCRIPTOR_DEVICE):
-                        return f"{self.str_endpoint()} Device not found and not a device descriptor!"
+        if self.decode_str is None:
+            if self.is_error():
+                if -self.status == errno.ENOENT:
+                    self.decode_str = f"{self.str_endpoint()} Error device reported not found!  Removing."
                 else:
-                    if self.prev is None:
-                        return f"{self.str_endpoint()} Device not found and not a device descriptor!"
-            else:
-                return f"{self.str_endpoint()} Device not found and not a device descriptor!"
+                    self.decode_str = f"{self.str_endpoint()} Error {-self.status} {errno.errorcode[-self.status]}"
+            if self.decode_str is not None:
+                return self.decode_str
 
-        match self.xfer_type:
-            case self.XFER_TYPE_CONTROL:
-                if self.flag_setup == self.FLAG_SETUP:
-                    # setup request
-                    return f"{self.str_endpoint()} {self.extra.decode()}"
+            if self.dev_map not in self.devmap:
+                # device doesn't exist
+                if self.xfer_type == self.XFER_TYPE_CONTROL:
+                    if self.flag_setup == self.FLAG_SETUP:
+                        # check to see if it's a device descriptor request
+                        setup_urb = SetupURB(self.rawdata[self.struct_start.size:])
+                        if not ((setup_urb.bmRequestType, setup_urb.bRequest) == SetupURB.MATCH_REQUEST_GET_DESCRIPTOR and \
+                                setup_urb.get_desc_value() == SetupURB.DESCRIPTOR_DEVICE):
+                            self.decode_str = f"{self.str_endpoint()} Device not found and not a device descriptor!"
+                    else:
+                        if self.prev is None:
+                            self.decode_str = f"{self.str_endpoint()} Device not found and not a device descriptor!"
                 else:
-                    prev = self.prev
-                    if prev.flag_setup == self.FLAG_SETUP:
-                        # setup response
-                        match (prev.extra.bmRequestType, prev.extra.bRequest):
-                            case SetupURB.MATCH_REQUEST_SET_CONFIGURATION:
-                                return f"{self.str_endpoint()} Set Configuration Response"
-                            case SetupURB.MATCH_REQUEST_SET_IDLE:
-                                return f"{self.str_endpoint()} Set Idle Response"
-                            case SetupURB.MATCH_REQUEST_GET_DESCRIPTOR:
-                                if len(self.data) == 0:
-                                    return f"{self.str_endpoint()} Response with No Data"
-                                else:
+                    self.decode_str = f"{self.str_endpoint()} Device not found and not a device descriptor!"
+            if self.decode_str is not None:
+                return self.decode_str
+
+            match self.xfer_type:
+                case self.XFER_TYPE_CONTROL:
+                    if self.flag_setup == self.FLAG_SETUP:
+                        # setup request
+                        self.decode_str = f"{self.str_endpoint()} {self.extra.decode()}"
+                    else:
+                        prev = self.prev
+                        if prev.flag_setup == self.FLAG_SETUP:
+                            # setup response
+                            match (prev.extra.bmRequestType, prev.extra.bRequest):
+                                case SetupURB.MATCH_REQUEST_SET_CONFIGURATION:
+                                    self.decode_str = f"{self.str_endpoint()} Set Configuration Response"
+                                case SetupURB.MATCH_REQUEST_SET_IDLE:
+                                    self.decode_str = f"{self.str_endpoint()} Set Idle Response"
+                                case SetupURB.MATCH_REQUEST_GET_DESCRIPTOR:
+                                    if len(self.data) == 0:
+                                        self.decode_str = f"{self.str_endpoint()} Response with No Data"
+                                    else:
+                                        match prev.extra.get_desc_value():
+                                            case SetupURB.DESCRIPTOR_DEVICE:
+                                                self.decode_str = f"{self.str_endpoint()} {self.new_dev}"
+                                            case SetupURB.DESCRIPTOR_CONFIGURATION:
+                                                self.decode_str = f"{self.str_endpoint()} {self.new_config}"
+                                            case SetupURB.DESCRIPTOR_STRING:
+                                                index = prev.extra.get_desc_index()
+                                                if index == 0:
+                                                    self.decode_str = f"{self.str_endpoint()} String Languages Record:"
+                                                    for language in URB.decode_language_list(self.data):
+                                                        self.decode_str += f" {language}"
+                                                else:
+                                                    self.decode_str = f"{self.str_endpoint()} String Response: \"{self.new_str}\""
+                                case SetupURB.MATCH_REQUEST_GET_INTERFACE_DESCRIPTOR:
                                     match prev.extra.get_desc_value():
-                                        case SetupURB.DESCRIPTOR_DEVICE:
-                                            return f"{self.str_endpoint()} {self.new_dev}"
-                                        case SetupURB.DESCRIPTOR_CONFIGURATION:
-                                            return f"{self.str_endpoint()} {self.new_config}"
-                                        case SetupURB.DESCRIPTOR_STRING:
-                                            index = prev.extra.get_desc_index()
-                                            if index == 0:
-                                                ret = f"{self.str_endpoint()} String Languages Record:"
-                                                for language in URB.decode_language_list(self.data):
-                                                    ret += f" {language}"
-                                                return ret
-                                            return f"{self.str_endpoint()} String Response: \"{self.new_str}\""
-                            case SetupURB.MATCH_REQUEST_GET_INTERFACE_DESCRIPTOR:
-                                match prev.extra.get_desc_value():
-                                    case SetupURB.DESCRIPTOR_HID:
-                                        return f"{self.str_endpoint()} HID Report Response  " \
-                                               f"{self.devmap[self.dev_map].get_hid_report(prev.extra.wIndex)}"
-                return f"{self.str_endpoint()} Unsupported Control Response"
-            case self.XFER_TYPE_INTERRUPT:
-                return f"{self.str_endpoint()} {self.result}"
-        return f"{self.str_endpoint()} Interpretation Unimplemented"
+                                        case SetupURB.DESCRIPTOR_HID:
+                                            self.decode_str = f"{self.str_endpoint()} HID Report Response  " \
+                                                              f"{self.devmap[self.dev_map].get_hid_report(prev.extra.wIndex)}"
+                    if self.decode_str is None:
+                        self.decode_str = f"{self.str_endpoint()} Unsupported Control Response"
+                case self.XFER_TYPE_INTERRUPT:
+                    self.decode_str = f"{self.str_endpoint()} {self.result}"
+            if self.decode_str is None:
+                self.decode_str = f"{self.str_endpoint()} Interpretation Unimplemented"
+        return self.decode_str
+
+    def __eq__(self, other):
+        if self.decode() == other.decode():
+            return True
+        return False
 
 class USBContext:
     def __init__(self, verbose=False):

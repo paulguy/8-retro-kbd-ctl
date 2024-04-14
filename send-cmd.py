@@ -62,7 +62,7 @@ def HIDIOCGINPUT(length):
 # send output report
 def HIDIOCSOUTPUT(length):
     return _IOC(ioctl_opt.IRC_READ, ord('H'), 0x0B, length)
-# send input report
+# get output report
 def HIDIOCGOUTPUT(length):
     return _IOC(ioctl_opt.IRC_READ, ord('H'), 0x0C, length)
 
@@ -78,6 +78,8 @@ def find_hidraw_by_ids(udev, vendor, product, interface):
            'ID_MODEL_ID' in usbdev.properties and \
            usbdev.properties['ID_VENDOR_ID'] == vendor and \
            usbdev.properties['ID_MODEL_ID'] == product:
+            # i don't know how reliable this will be in the future, but
+            # i could see no other way
             usbinterface = device.parent.parent.properties['DEVPATH']
             index = usbinterface.rindex(".")+1
             if int(usbinterface[index:]) == interface:
