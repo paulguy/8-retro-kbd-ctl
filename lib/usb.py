@@ -5,6 +5,9 @@ import array
 
 from .util import chrbyte, strbcd, str_hex, str_endpoint
 
+MICROSECOND = 1000000
+MICROSECOND_EXP = 6
+
 class UninterpretableDataException(Exception):
     pass
 
@@ -1284,7 +1287,7 @@ class URB:
     flag_setup : int
     flag_data : int
     ts_sec : int
-    ts_nsec : int
+    ts_usec : int
     status : int
     length : int
     len_cap : int
@@ -1391,7 +1394,7 @@ class URB:
         self.rawdata = data
         # get beginning
         self.urb_id, self.urb_type, self.xfer_type, self.epnum, self.devnum, self.busnum, \
-            self.flag_setup, self.flag_data, self.ts_sec, self.ts_nsec, self.status, \
+            self.flag_setup, self.flag_data, self.ts_sec, self.ts_usec, self.status, \
             self.length, self.len_cap = self.struct_start.unpack(data[:self.struct_start.size])
         # get end
         self.interval, self.start_frame, self.xfer_flags, self.ndesc = \
@@ -1476,7 +1479,7 @@ class URB:
         ret = f"URB ID: {self.urb_id:X}, URB Type: {urb_type_str}, Transfer Type: {xfer_type_str}, " \
               f"Direction/Subject: {direction}, Endpoint: {self.endpoint()}, " \
               f"Device: {self.devnum}, Bus: {self.busnum}, Setup Flag: {self.flag_setup}, " \
-              f"Data Flag: {data_present}, Time: {self.ts_sec}, {self.ts_nsec}, " \
+              f"Data Flag: {data_present}, Time: {self.ts_sec}, {self.ts_usec}, " \
               f"Status: {status_str}, Requested Packet Length: {self.length}, " \
               f"Captured Length: {self.len_cap}, Interval: {self.interval}, " \
               f"Start Frame: {self.start_frame}, Transfer Flags: {self.xfer_flags}, " \
@@ -1569,7 +1572,18 @@ class USBContext:
         # present view of devices at any moment
         self.devmap = {}
         self.prev = None
+        self.start_sec = 0
+        self.start_usec = 0
 
     def parse_urb(self, data):
         self.prev = URB(self.devmap, data, self.prev, self.verbose)
-        return self.prev
+        if self.start_sec == 0:
+            self.start_sec = self.prev.ts_sec
+            self.start_usec = self.prev.ts_usec
+        ts_sec = self.prev.ts_sec - self.start_sec
+        if self.prev.ts_usec < self.start_usec:
+            ts_sec -= 1
+            ts_usec = MICROSECOND - (self.start_usec - self.prev.ts_usec)
+        else:
+            ts_usec = self.prev.ts_usec - self.start_usec
+        return self.prev, ts_sec, ts_usec

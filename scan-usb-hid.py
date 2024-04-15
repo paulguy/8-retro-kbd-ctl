@@ -4,7 +4,7 @@ from dataclasses import dataclass
 import pcapng
 import sys
 
-from lib.usb import USBContext
+from lib.usb import USBContext, MICROSECOND_EXP
 from lib.util import str_hex
 
 LOOKBEHIND_LENGTH = 10
@@ -14,6 +14,14 @@ MIN_DUP = 1
 class HwInterface:
     link_type : int
     name : str
+
+def ts_to_sec(sec, usec, precision=2):
+    decimal = usec // int(10**(MICROSECOND_EXP-precision))
+    decimal = float(decimal) / (10**precision)
+    return float(sec) + decimal
+
+def str_urb(num, urb):
+    return f"{num} {ts_to_sec(urb[1], urb[2])} {urb[0].decode()}"
 
 def _main(infile, verbose, count):
     # not device interfaces, capture interfaces
@@ -48,24 +56,24 @@ def _main(infile, verbose, count):
                 if len(last_urbs) > LOOKBEHIND_LENGTH:
                     for i in range(1, LOOKBEHIND_LENGTH//2):
                         for j in range(1, i):
-                            if last_urbs[-j] == last_urbs[-(i+j)]:
+                            if last_urbs[-j][0] == last_urbs[-(i+j)][0]:
                                 dups_count += 1
                         if dups_count == i:
                             duplicate = True
                     last_urbs = last_urbs[1:]
                 if verbose:
-                    print(last_urbs[-1])
+                    print(last_urbs[-1][0])
                 if duplicate:
                     dups += 1
                 else:
                     if dups > 0:
                         if dups <= MIN_DUP:
                             for i in range(-MIN_DUP-1, -1):
-                                print(f"{num+i+1} {last_urbs[i].decode()}")
+                                print(str_urb(num+i+1, last_urbs[i]))
                         else:
                             print(f"(After {dups} duplicate patterns, last size {dups_count})")
                         dups = 0
-                    print(f"{num} {last_urbs[-1].decode()}")
+                    print(str_urb(num, last_urbs[-1]))
             except Exception as e:
                 print(str_hex(block.packet_data))
                 raise e
