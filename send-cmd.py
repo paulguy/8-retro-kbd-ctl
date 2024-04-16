@@ -13,7 +13,7 @@ from ioctl_opt import IOR as _IOR
 from ioctl_opt import IOC as _IOC
 
 from lib.usb import HID, Endpoint
-from lib.util import BIT_MASKS
+from lib.util import BIT_MASKS, bits_to_bytes
 
 VENDOR_ID = "2dc8"
 PRODUCT_ID = "5200"
@@ -150,12 +150,8 @@ def get_largest_report(reports):
     return largest
 
 def generate_report(reports, report_id, args):
-    bufsize = reports[report_id].get_size()
-    # get buffer size in bytes
-    if bufsize % 8 > 0:
-        bufsize += 8
-    bufsize //= 8
-    bufsize += 1 # for report ID
+    # convert to bytes and add 1 for report ID
+    bufsize = bits_to_bytes(reports[report_id].get_size()) + 1
 
     buf = array.array('B', (report_id,))
 
@@ -170,20 +166,23 @@ def listen(fd, hid, in_reports, out_reports):
     out_largest = get_largest_report(out_reports)
     if out_largest > largest:
         largest = out_largest
+    largest = bits_to_bytes(largest) + 1
 
     buf = array.array('B', itertools.repeat(0, largest))
 
     while True:
+        select.select((fd,), (), (), 1)
+        data_read = 0
         try:
-            select.select((fd,), (), (), 1)
             data_read = os.readv(fd, (buf,))
+        except BlockingIOError:
+            pass
+        if data_read > 0:
             report_id = buf[0]
             direction = Endpoint.ADDRESS_DIR_OUT
             if report_id in in_reports:
                 direction = Endpoint.ADDRESS_DIR_IN
             print(hid.decode_interrupt(report_id, direction, buf[1:]))
-        except BlockingIOError:
-            pass
 
 def get_hid_desc(fd=-1, cached=True):
     desc = array.array('B')
@@ -228,14 +227,14 @@ if __name__ == '__main__':
             with HIDDEV(VENDOR_ID, PRODUCT_ID, INTERFACE_NUM) as fd:
                 hid = get_hid_desc(fd, cached=False)
 
-                out_reports = hid.get_reports(Endpoint.ADDRESS_DIR_OUT)
-                in_reports = hid.get_reports(Endpoint.ADDRESS_DIR_IN)
-                print("Out Reports")
-                for report in out_reports.keys():
-                    print(f"{report}: {out_reports[report].get_size()}bit {out_reports[report]}")
-                print("In Reports")
-                for report in in_reports.keys():
-                    print(f"{report}: {in_reports[report].get_size()}bit {in_reports[report]}")
+            out_reports = hid.get_reports(Endpoint.ADDRESS_DIR_OUT)
+            in_reports = hid.get_reports(Endpoint.ADDRESS_DIR_IN)
+            print("Out Reports")
+            for report in out_reports.keys():
+                print(f"{report}: {out_reports[report].get_size()}bit {out_reports[report]}")
+            print("In Reports")
+            for report in in_reports.keys():
+                print(f"{report}: {in_reports[report].get_size()}bit {in_reports[report]}")
         elif sys.argv[1] == "decode-raw":
             if len(sys.argv) > 2:
                 # try to get the cached value first, otherwise try to get it from the device

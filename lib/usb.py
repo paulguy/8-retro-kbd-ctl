@@ -3,10 +3,7 @@ import struct
 import errno
 import array
 
-from .util import chrbyte, strbcd, str_hex, str_endpoint, SHIFT_MASKS_LOW, SHIFT_MASKS_HIGH, BIT_MASKS
-
-MICROSECOND = 1000000
-MICROSECOND_EXP = 6
+from .util import chrbyte, strbcd, str_hex, str_endpoint, SHIFT_MASKS_LOW, SHIFT_MASKS_HIGH, BIT_MASKS, MICROSECOND
 
 class UninterpretableDataException(Exception):
     pass

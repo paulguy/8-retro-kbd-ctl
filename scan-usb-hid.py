@@ -4,8 +4,8 @@ from dataclasses import dataclass
 import pcapng
 import sys
 
-from lib.usb import USBContext, MICROSECOND_EXP
-from lib.util import str_hex
+from lib.usb import USBContext
+from lib.util import str_hex, ts_to_sec
 
 LOOKBEHIND_LENGTH = 10
 MIN_DUP = 1
@@ -14,11 +14,6 @@ MIN_DUP = 1
 class HwInterface:
     link_type : int
     name : str
-
-def ts_to_sec(sec, usec, precision=2):
-    decimal = usec // int(10**(MICROSECOND_EXP-precision))
-    decimal = float(decimal) / (10**precision)
-    return float(sec) + decimal
 
 def str_urb(num, urb):
     return f"{num} {ts_to_sec(urb[1], urb[2])} {urb[0].decode()}"

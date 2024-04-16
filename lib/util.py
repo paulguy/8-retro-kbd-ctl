@@ -2,6 +2,9 @@ SHIFT_MASKS_LOW = [0xFF, 0x7F, 0x3F, 0x1F, 0x0F, 0x07, 0x03, 0x01]
 SHIFT_MASKS_HIGH = [0xFF, 0xFE, 0xFC, 0xF8, 0xF0, 0xE0, 0xC0, 0x80]
 BIT_MASKS = [0x80, 0x40, 0x20, 0x10, 0x08, 0x04, 0x02, 0x01]
 
+MICROSECOND = 1000000
+MICROSECOND_EXP = 6
+
 def chrbyte(char):
     if char < ord(' ') or char > ord('~'):
         return '.'
@@ -44,3 +47,13 @@ def str_hex(data):
 
 def str_endpoint(busnum, devnum, endpoint):
     return f"{busnum}.{devnum}.{endpoint}"
+
+def bits_to_bytes(bits):
+    if bits % 8 > 0:
+        bits += 8
+    return bits // 8
+
+def ts_to_sec(sec, usec, precision=2):
+    decimal = usec // int(10**(MICROSECOND_EXP-precision))
+    decimal = float(decimal) / (10**precision)
+    return float(sec) + decimal
