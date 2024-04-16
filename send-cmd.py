@@ -105,7 +105,7 @@ class HIDDEV:
         os.close(self.fd)
         return False
 
-def get_desc(fd):
+def get_desc_from_device(fd):
     size = ctypes.c_uint()
     fcntl.ioctl(fd, HIDIOCGDESCSIZE, size)
 
@@ -149,6 +149,22 @@ def get_largest_report(reports):
             largest = size
     return largest
 
+def generate_report(reports, report_id, args):
+    bufsize = reports[report_id].get_size()
+    # get buffer size in bytes
+    if bufsize % 8 > 0:
+        bufsize += 8
+    bufsize //= 8
+    bufsize += 1 # for report ID
+
+    buf = array.array('B', (report_id,))
+
+    buf.extend(decode_args(args))
+    if len(buf) < bufsize:
+        buf.extend(itertools.repeat(0, bufsize - len(buf)))
+
+    return buf
+
 def listen(fd, hid, in_reports, out_reports):
     largest = get_largest_report(in_reports)
     out_largest = get_largest_report(out_reports)
@@ -169,6 +185,33 @@ def listen(fd, hid, in_reports, out_reports):
         except BlockingIOError:
             pass
 
+def get_hid_desc(fd, cached=True):
+    desc = array.array('B')
+    fromfile = False
+
+    if cached:
+        try:
+            with open("hid_desc.bin", "rb") as descfile:
+                descfile.seek(0, os.SEEK_END)
+                size = descfile.tell()
+                descfile.seek(0, os.SEEK_SET)
+                desc.fromfile(descfile, size)
+                fromfile = True
+        except FileNotFoundError:
+            pass
+
+    if len(desc) == 0:
+        desc = get_desc_from_device(fd)
+
+    if not fromfile:
+        with open("hid_desc.bin", "wb") as descfile:
+            desc.tofile(descfile)
+
+    hid = HID()
+    hid.decode_desc(desc)
+
+    return hid
+
 def usage():
     print(f"USAGE: {sys.argv[0]} <list|send-raw <report_id> [data]>")
 
@@ -176,10 +219,8 @@ if __name__ == '__main__':
     if len(sys.argv) > 1:
         if sys.argv[1] == "list":
             with HIDDEV(VENDOR_ID, PRODUCT_ID, INTERFACE_NUM) as fd:
-                desc = get_desc(fd)
+                hid = get_hid_desc(fd, cached=False)
 
-                hid = HID()
-                hid.decode_desc(desc)
                 out_reports = hid.get_reports(Endpoint.ADDRESS_DIR_OUT)
                 in_reports = hid.get_reports(Endpoint.ADDRESS_DIR_IN)
                 print("Out Reports")
@@ -191,10 +232,8 @@ if __name__ == '__main__':
         elif sys.argv[1] == "decode-raw":
             if len(sys.argv) > 2:
                 with HIDDEV(VENDOR_ID, PRODUCT_ID, INTERFACE_NUM) as fd:
-                    desc = get_desc(fd)
+                    hid = get_hid_desc(fd)
 
-                    hid = HID()
-                    hid.decode_desc(desc)
                     reports = hid.get_reports(Endpoint.ADDRESS_DIR_OUT)
                     report_id = int(sys.argv[2])
                     if report_id not in reports:
@@ -203,23 +242,15 @@ if __name__ == '__main__':
                             print(f" {report_id}", end='')
                         print()
                     else:
-                        bufsize = reports[report_id].get_size()
-                        # get buffer size in bytes
-                        if bufsize % 8 > 0:
-                            bufsize += 8
-                        bufsize //= 8
-                        buf = decode_args(sys.argv[3:])
-                        if len(buf) < bufsize:
-                            buf.extend(itertools.repeat(0, bufsize - len(buf)))
-                        print(hid.decode_interrupt(report_id, Endpoint.ADDRESS_DIR_OUT, buf))
+                        buf = generate_report(reports, report_id, sys.argv[3:])
+
+                        print(hid.decode_interrupt(buf[0], Endpoint.ADDRESS_DIR_OUT, buf[1:]))
             else:
                 usage()
         elif sys.argv[1] == "listen":
             with HIDDEV(VENDOR_ID, PRODUCT_ID, INTERFACE_NUM) as fd:
-                desc = get_desc(fd)
+                hid = get_hid_desc(fd)
 
-                hid = HID()
-                hid.decode_desc(desc)
                 in_reports = hid.get_reports(Endpoint.ADDRESS_DIR_OUT)
                 out_reports = hid.get_reports(Endpoint.ADDRESS_DIR_IN)
 
@@ -227,10 +258,8 @@ if __name__ == '__main__':
         elif sys.argv[1] == "send-raw":
             if len(sys.argv) > 2:
                 with HIDDEV(VENDOR_ID, PRODUCT_ID, INTERFACE_NUM) as fd:
-                    desc = get_desc(fd)
+                    hid = get_hid_desc(fd)
 
-                    hid = HID()
-                    hid.decode_desc(desc)
                     in_reports = hid.get_reports(Endpoint.ADDRESS_DIR_IN)
                     out_reports = hid.get_reports(Endpoint.ADDRESS_DIR_OUT)
 
@@ -241,15 +270,10 @@ if __name__ == '__main__':
                             print(f" {report_id}", end='')
                         print()
                     else:
-                        bufsize = out_reports[report_id].get_size()
-                        # get buffer size in bytes
-                        if bufsize % 8 > 0:
-                            bufsize += 8
-                        bufsize //= 8
-                        buf = decode_args(sys.argv[3:])
-                        if len(buf) < bufsize:
-                            buf.extend(itertools.repeat(0, bufsize - len(buf)))
-                        print(f"{hid.decode_interrupt(report_id, Endpoint.ADDRESS_DIR_OUT, buf)}")
+                        buf = generate_report(out_reports, report_id, sys.argv[3:])
+
+                        print(hid.decode_interrupt(buf[0], Endpoint.ADDRESS_DIR_OUT, buf[1:]))
+
                         os.write(fd, buf)
 
                         listen(fd, hid, in_reports, out_reports)

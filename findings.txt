@@ -1,0 +1,16 @@
+On an invalid packet (or at least wrong report ID?):
+HID Report In 84: ((([E4 09 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00])))
+
+reports 177/178 in/out - information and firmware updating
+usually starts with AA 55, except when AA 56
+next value seems to be a length
+then next value seems to be flags or something
+then some kind of sequence number that's not always incremented and separate
+ for send and receive
+then data
+responses to 55 seem to be with A3 followed by the sequence number
+
+reports 84/82 "R"/"T" in/out - some kind of raw status and programming?
+seems to start with some kind of request or command with response starting
+with the same byte, but not always
+
