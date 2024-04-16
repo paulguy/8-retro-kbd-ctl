@@ -3,7 +3,7 @@ import struct
 import errno
 import array
 
-from .util import chrbyte, strbcd, str_hex, str_endpoint
+from .util import chrbyte, strbcd, str_hex, str_endpoint, SHIFT_MASKS_LOW, SHIFT_MASKS_HIGH, BIT_MASKS
 
 MICROSECOND = 1000000
 MICROSECOND_EXP = 6
@@ -25,10 +25,12 @@ class DevMap:
     device : int
 
 class HIDCollection:
+    collection_id : int # not part of the binary format
     flag : int
     usage : int
 
-    def __init__(self, flag=-1, usage=0):
+    def __init__(self, collection_id, flag=-1, usage=0):
+        self.collection_id = collection_id
         self.flag = flag
         self.usage = usage
         self.items = []
@@ -52,6 +54,30 @@ class HIDCollection:
 
     def __len__(self):
         return len(self.items)
+
+    def __eq__(self, other):
+        return self.collection_id == other.collection_id
+
+    def __contains__(self, item):
+        for report in self.items:
+            if isinstance(report, HIDCollection) and report.collection_id == item.collection_id:
+                return True
+        return False
+
+    def __getitem__(self, item):
+        for report in self.items:
+            if isinstance(report, HIDCollection) and report.collection_id == item:
+                return report
+        raise IndexError("No collection with id {item} in this collection!")
+
+    def get_size(self):
+        size = 0
+        for report in self:
+            if isinstance(report, HIDCollection):
+                size += report.get_size()
+            else:
+                size += report.size * report.count
+        return size
 
 @dataclass
 class HIDIOItem:
@@ -366,6 +392,7 @@ class HID:
 
         collections = [self.descriptors]
 
+        collection_id = 1 # the "root" is already 0
         pos = 0
         padding = " "
         while pos < len(data):
@@ -429,7 +456,8 @@ class HID:
                             case self.ITEM_MAIN_COLLECTION:
                                 tag_str = "Collection"
                                 flags = HID.data_uint(data[pos+1:pos+1+size])
-                                collections.append(HIDCollection(flags, usage))
+                                collections.append(HIDCollection(collection_id, flags, usage))
+                                collection_id += 1
                                 collections[-2].append(collections[-1])
                                 usage_list = []
                                 usage_minimum = 0
@@ -562,16 +590,12 @@ class HID:
                     padding += " "
                 pos += size + self.ITEM_SHORT_HDR_SIZE
 
-    SHIFT_MASKS_LOW = [0xFF, 0x7F, 0x3F, 0x1F, 0x0F, 0x07, 0x03, 0x01]
-    SHIFT_MASKS_HIGH = [0xFF, 0xFE, 0xFC, 0xF8, 0xF0, 0xE0, 0xC0, 0x80]
-    BIT_MASKS = [0x80, 0x40, 0x20, 0x10, 0x08, 0x04, 0x02, 0x01]
-
     def value_bits_from_data(data, bytepos, bitpos, bits):
         value = array.array('B')
         byte = data[bytepos]
 
         if bitpos > 0:
-            byte &= HID.SHIFT_MASKS_LOW[bitpos]
+            byte &= SHIFT_MASKS_LOW[bitpos]
             byte <<= bitpos
 
             for i in range(bits // 8):
@@ -581,7 +605,7 @@ class HID:
                 value.append(byte | byte2)
 
                 byte = data[bytepos+1+i]
-                byte &= HID.SHIFT_MASKS_LOW[bitpos]
+                byte &= SHIFT_MASKS_LOW[bitpos]
                 byte <<= bitpos
 
             if (bitpos + bits) % 8 > 0:
@@ -590,14 +614,14 @@ class HID:
             else:
                 byte2 = 0
 
-            value.append((byte | byte2) & HID.SHIFT_MASKS_HIGH[(bitpos + bits) % 8])
+            value.append((byte | byte2) & SHIFT_MASKS_HIGH[(bitpos + bits) % 8])
         else:
             for i in range(bits // 8):
                 value.append(data[bytepos+i])
 
             if bits % 8 > 0:
                 byte = data[bytepos+(bits // 8)]
-                byte &= HID.SHIFT_MASKS_HIGH[bits % 8]
+                byte &= SHIFT_MASKS_HIGH[bits % 8]
 
                 value.append(byte)
 
@@ -628,10 +652,10 @@ class HID:
                                     for bit in range(8):
                                         if bytenum * 8 + bit >= report.size:
                                             break
-                                        if byte & HID.BIT_MASKS[bit]:
-                                            ret += "1"
+                                        if byte & BIT_MASKS[bit]:
+                                            ret += "#"
                                         else:
-                                            ret += "0"
+                                            ret += "."
                             if countnum < report.count - 1:
                                 ret += " "
                             bytepos += report.size // 8
@@ -651,32 +675,69 @@ class HID:
         ret += ")"
         return ret
 
-    def decode_interrupt(self, endpoint, data):
+    def decode_interrupt(self, report_id, direction, data):
         try:
-            ret = HID.process_collection(data[1:], data[0], endpoint.get_direction(), self.descriptors, 0, 0)
+            ret = HID.process_collection(data, report_id, direction, self.descriptors, 0, 0)
         except IndexError:
-            return f"Malformed packet! {endpoint}"
+            return f"Malformed packet!"
         if ret is not None:
-            return f"HID Report {data[0]}: ({ret})"
+            dir_str = "In"
+            if direction == Endpoint.ADDRESS_DIR_OUT:
+                dir_str = "Out"
+            return f"HID Report {dir_str} {report_id}: ({ret})"
         else:
-            return f"Couldn't extract data from HID report! {endpoint}"
+            return f"Couldn't extract data from HID report!"
+
+    def do_get_reports(reports, collections, direction):
+        for report in collections[-1]:
+            if isinstance(report, HIDCollection):
+                # add the collection to the stack and process any collections or reports
+                collections.append(report)
+                HID.do_get_reports(reports, collections, direction)
+                # pop it back off
+                collections = collections[:-1]
+            else:
+                if not report.flags & HID.ITEM_MAIN_FLAG_CONSTANT and \
+                   report.direction == direction:
+                    # if this report hasn't been seen yet, add it to the map
+                    if report.report_id not in reports:
+                        reports[report.report_id] = HIDCollection(0)
+                    # make sure there's a path to this report
+                    # and make report_collection the collection to add the report to
+                    report_collection = reports[report.report_id]
+                    for collection in collections[1:]:
+                        try:
+                            report_collection = report_collection[collection.collection_id]
+                        except IndexError:
+                            report_collection.append(HIDCollection(collection.collection_id, collection.flag, collection.usage))
+                            report_collection = report_collection[collection.collection_id]
+                    # add the applicable report
+                    report_collection.append(report)
+
+    def get_reports(self, direction):
+        reports = {}
+        collections = [self.descriptors]
+
+        HID.do_get_reports(reports, collections, direction)
+
+        return reports
 
     def __init__(self, data=None):
         if data is not None:
-            length, desc, self.hid, self.country_code, self.num_descriptors, self.descriptor_type, \
+            length, desc, self.hid, self.country_code, self.num_descriptor, self.descriptor_type, \
                 self.descriptor_length = self.struct.unpack(data[:self.struct.size])
         else:
             self.hid = 0
             self.country_code = 0
-            self.num_descriptors = 0
+            self.num_descriptor = 0
             self.descriptor_type = 0
             self.descriptor_length = 0
         self.desc_str = ""
-        self.descriptors = HIDCollection()
+        self.descriptors = HIDCollection(0)
 
     def __str__(self):
         return f"HID  ID: {strbcd(self.hid)} Country Code: {self.country_code}" \
-               f" Descriptors: {self.num_descriptors} Type: {self.descriptor_type}" \
+               f" Descriptors: {self.num_descriptor} Type: {self.descriptor_type}" \
                f" Descriptor Length: {self.descriptor_length}{self.desc_str}\n" \
                f" Structure: {self.descriptors}"
 
@@ -797,7 +858,7 @@ class Interface:
 
     def interrupt(self, endpoint, data):
         if self.interface_class == self.CLASS_HID:
-            return self.hid.decode_interrupt(self.endpoints[endpoint], data)
+            return self.hid.decode_interrupt(data[0], self.endpoints[endpoint].get_direction(), data[1:])
         return None
 
     def get_endpoints(self):
