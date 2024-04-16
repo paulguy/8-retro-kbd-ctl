@@ -185,7 +185,7 @@ def listen(fd, hid, in_reports, out_reports):
         except BlockingIOError:
             pass
 
-def get_hid_desc(fd, cached=True):
+def get_hid_desc(fd=-1, cached=True):
     desc = array.array('B')
     fromfile = False
 
@@ -201,6 +201,8 @@ def get_hid_desc(fd, cached=True):
             pass
 
     if len(desc) == 0:
+        if fd < 0:
+            return None
         desc = get_desc_from_device(fd)
 
     if not fromfile:
@@ -213,7 +215,12 @@ def get_hid_desc(fd, cached=True):
     return hid
 
 def usage():
-    print(f"USAGE: {sys.argv[0]} <list|send-raw <report_id> [data]>")
+    print(f"USAGE: {sys.argv[0]} <list|decode-raw <report-id> [data]|send-raw <report-id> [data]|listen>\n\n"
+           "list - Get a list of reports, also update report cache.\n"
+           "decode-raw - Decode a report given on the command-line.\n"
+           "send-raw - Send a report given on the command-line and start listening.\n"
+           "listen - Just listen.\n\n"
+           "A report is given as a decimal report ID followed by hex octets or bits given as # for 1 and . for 0")
 
 if __name__ == '__main__':
     if len(sys.argv) > 1:
@@ -231,20 +238,23 @@ if __name__ == '__main__':
                     print(f"{report}: {in_reports[report].get_size()}bit {in_reports[report]}")
         elif sys.argv[1] == "decode-raw":
             if len(sys.argv) > 2:
-                with HIDDEV(VENDOR_ID, PRODUCT_ID, INTERFACE_NUM) as fd:
-                    hid = get_hid_desc(fd)
+                # try to get the cached value first, otherwise try to get it from the device
+                hid = get_hid_desc(-1)
+                if hid is None:
+                    with HIDDEV(VENDOR_ID, PRODUCT_ID, INTERFACE_NUM) as fd:
+                        hid = get_hid_desc(fd)
 
-                    reports = hid.get_reports(Endpoint.ADDRESS_DIR_OUT)
-                    report_id = int(sys.argv[2])
-                    if report_id not in reports:
-                        print(f"{report_id} isn't a valid report ID, valid options are:", end='')
-                        for report_id in reports.keys():
-                            print(f" {report_id}", end='')
-                        print()
-                    else:
-                        buf = generate_report(reports, report_id, sys.argv[3:])
+                reports = hid.get_reports(Endpoint.ADDRESS_DIR_OUT)
+                report_id = int(sys.argv[2])
+                if report_id not in reports:
+                    print(f"{report_id} isn't a valid report ID, valid options are:", end='')
+                    for report_id in reports.keys():
+                        print(f" {report_id}", end='')
+                    print()
+                else:
+                    buf = generate_report(reports, report_id, sys.argv[3:])
 
-                        print(hid.decode_interrupt(buf[0], Endpoint.ADDRESS_DIR_OUT, buf[1:]))
+                    print(hid.decode_interrupt(buf[0], Endpoint.ADDRESS_DIR_OUT, buf[1:]))
             else:
                 usage()
         elif sys.argv[1] == "listen":
