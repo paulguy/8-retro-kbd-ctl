@@ -16,7 +16,7 @@ def get_better_string(orig, new):
     # otherwise, apply the new string
     return True, new
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, eq=True)
 class DevMap:
     bus : int
     device : int
@@ -1460,10 +1460,13 @@ class URB:
 
         self.dev_map = DevMap(self.busnum, self.devnum)
 
+        self.state = False
+
         if self.is_error():
             if -self.status == errno.ENOENT:
                 # device no longer exists
                 del devmap[self.dev_map]
+                self.state = self.dev_map
             return
 
         if self.dev_map not in devmap:
@@ -1489,6 +1492,7 @@ class URB:
 
         match self.xfer_type:
             case self.XFER_TYPE_CONTROL:
+                self.state = True
                 if self.flag_setup == self.FLAG_SETUP:
                     # setup request
                     self.extra = SetupURB(data[self.struct_start.size:])
@@ -1504,17 +1508,19 @@ class URB:
                                 match prev.extra.get_desc_value():
                                     case SetupURB.DESCRIPTOR_DEVICE:
                                         self.new_dev = Device(self.data)
-                                        # add new devices if they replace the old, and aren't a duplicate report
-                                        if self.dev_map in devmap:
-                                            if self.new_dev == devmap[self.dev_map]:
-                                                if verbose:
-                                                    print(f"{self.str_endpoint()} Ignoring same device in {self.dev_map.bus}.{self.dev_map.device}: {self.new_dev}")
-                                            else:
-                                                devmap[self.dev_map] = self.new_dev
-                                                if verbose:
-                                                    print(f"{self.str_endpoint()} Replacement in {self.dev_map.bus}.{self.dev_map.device}: {self.new_dev}")
-                                        else:
+                                        # Try to find an identical device this may map to
+                                        found = None
+                                        for device in devmap.keys():
+                                            if self.new_dev == devmap[device]:
+                                                found = device
+                                                break
+
+                                        if found is None:
+                                            # if not found, just add it as usual
                                             devmap[self.dev_map] = self.new_dev
+                                        else:
+                                            # if one was found, alias it to the old
+                                            devmap[self.dev_map] = devmap[found]
                                     case SetupURB.DESCRIPTOR_CONFIGURATION:
                                         self.new_config = Configuration(self.data)
                                         devmap[self.dev_map].add_configuration(self.new_config)
@@ -1632,9 +1638,24 @@ class USBContext:
         self.prev = None
         self.start_sec = 0
         self.start_usec = 0
+        self.state_urbs = []
 
     def parse_urb(self, data):
         self.prev = URB(self.devmap, data, self.prev, self.verbose)
+
+        if isinstance(self.prev.state, DevMap):
+            # lost device sets state to the DevMap for the device that was lost
+            # delete any state URBs with this devmap
+            delete_urbs = []
+            for urb in self.state_urbs:
+                if urb.dev_map == self.prev.state:
+                    delete_urbs.append(urb)
+            for urb in delete_urbs:
+                self.state_urbs.remove(urb)
+        elif self.prev.state:
+            # save URBs relevant to state
+            self.state_urbs.append(self.prev)
+
         if self.start_sec == 0:
             self.start_sec = self.prev.ts_sec
             self.start_usec = self.prev.ts_usec
@@ -1645,3 +1666,11 @@ class USBContext:
         else:
             ts_usec = self.prev.ts_usec - self.start_usec
         return self.prev, ts_sec, ts_usec
+
+    def get_state(self):
+        return self.state_urbs
+
+    def set_state(self, state):
+        for item in state:
+            print(self.parse_urb(item.tobytes())[0].decode())
+        self.start_sec = 0
