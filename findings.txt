@@ -1,16 +1,45 @@
 On an invalid packet (or at least wrong report ID?):
 HID Report In 84: ((([E4 09 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00])))
 
+Success?
+HID Report In 84: ((([E4 08 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00])))
+
 reports 177/178 in/out - information and firmware updating
 usually starts with AA 55, except when AA 56
-next value seems to be a length
+next value seems to be a length, lengths longer than 1 packet will be sent out
+on multiple packets
 then next value seems to be flags or something
 then some kind of sequence number that's not always incremented and separate
  for send and receive
 then data
 responses to 55 seem to be with A3 followed by the sequence number
 
+AA 55 03 FC 01 60 60 - Get version information and maybe other things
+
 reports 84/82 "R"/"T" in/out - some kind of raw status and programming?
 seems to start with some kind of request or command with response starting
 with the same byte, but not always
 
+76 a5 - Enable some kind of raw key matrix mode or something?
+76 ff - Disable?
+
+70 - Set profile name, seems to be followed by a 16 bit length in bytes then
+     utf-16 (or ucs2?) data
+
+Observations:
+170 21.29 5.9.5 HID Report Out 178: ((([AA 55 03 FC 01 60 60 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00])))
+172 21.29 5.9.4 HID Report In 177: ((([AA 55 28 D7 01 A3 01 60 00 54 4C 20 38 42 69 44 6F 00 00 05 03 31 2E 37 2E 32 72 00 00 00 00 31])))
+174 21.29 5.9.4 HID Report In 177: ((([2E 31 2E 30 00 00 00 00 00 01 00 B9 05 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00])))
+
+176 21.3 5.9.5 HID Report Out 82: ((([85 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00])))
+178 21.3 5.9.4 HID Report In 84: ((([85 FF 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00])))
+
+180 21.31 5.9.5 HID Report Out 82: ((([06 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00])))
+182 21.31 5.9.4 HID Report In 84: ((([06 19 00 C8 2D 00 52 72 01 00 64 01 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00])))
+
+186 28.68 5.9.5 HID Report Out 82: ((([80 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00])))
+190 28.68 5.9.4 HID Report In 84: ((([80 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00])))
+
+2904 46.02 5.9.5 HID Report Out 82: ((([78 01 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00])))
+2906 46.02 5.9.4 HID Report In 84: ((([E4 08 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00])))
+Usually follows a 76 ff, also have seen 78 with 00, 02 and 04

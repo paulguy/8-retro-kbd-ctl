@@ -118,7 +118,9 @@ def get_desc_from_device(fd):
 def decode_args(args):
     vals = array.array('B')
     bit = 0
+    num = 0
     for arg in args:
+        num += 1
         try:
             byte = int(arg, base=16)
             if bit == 0:
@@ -127,19 +129,26 @@ def decode_args(args):
                 vals[-1] |= byte >> bit
                 vals.append((byte << (8 - bit)) & 0xFF)
         except ValueError:
+            if arg[0] == 'x':
+                count = 0
+                if len(arg) > 1:
+                    count = int(arg[1:])
+                return num, vals, count
+
             if bit == 0:
                 vals.append(0)
-            for char in arg:
+
+            for num, char in enumerate(arg):
                 match char:
                     case '.':
                         pass # already 0
                     case '#':
                         vals[-1] |= BIT_MASKS[bit]
-                    case x:
-                        raise ValueError(f"Unknown character '{x}'!")
+                    case _:
+                        raise ValueError(f"Unknown argument '{arg}'!")
                 bit += 1
                 bit %= 8
-    return vals
+    return num, vals, -1
 
 def get_largest_report(reports):
     largest = 0
@@ -149,19 +158,31 @@ def get_largest_report(reports):
             largest = size
     return largest
 
-def generate_report(reports, report_id, args):
-    # convert to bytes and add 1 for report ID
-    bufsize = bits_to_bytes(reports[report_id].get_size()) + 1
+def generate_reports(reports, args):
+    bufs = []
+    pos = 0
+    while pos < len(args):
+        report_id = int(args[pos])
 
-    buf = array.array('B', (report_id,))
+        # convert to bytes and add 1 for report ID
+        try:
+            bufsize = bits_to_bytes(reports[report_id].get_size()) + 1
+        except KeyError:
+            raise IndexError(f"Invalid report ID {report_id}, see list command for output reports.")
 
-    buf.extend(decode_args(args))
-    if len(buf) < bufsize:
-        buf.extend(itertools.repeat(0, bufsize - len(buf)))
+        buf = array.array('B', (report_id,))
 
-    return buf
+        num, vals, count = decode_args(args[pos+1:])
+        pos += num + 1
 
-def listen(fd, hid, in_reports, out_reports):
+        buf.extend(vals)
+        if len(buf) < bufsize:
+            buf.extend(itertools.repeat(0, bufsize - len(buf)))
+        bufs.append((buf, count))
+
+    return bufs
+
+def listen(fd, hid, in_reports, out_reports, count=-1):
     largest = get_largest_report(in_reports)
     out_largest = get_largest_report(out_reports)
     if out_largest > largest:
@@ -170,7 +191,7 @@ def listen(fd, hid, in_reports, out_reports):
 
     buf = array.array('B', itertools.repeat(0, largest))
 
-    while True:
+    while count != 0:
         select.select((fd,), (), (), 1)
         data_read = 0
         try:
@@ -183,6 +204,8 @@ def listen(fd, hid, in_reports, out_reports):
             if report_id in in_reports:
                 direction = Endpoint.ADDRESS_DIR_IN
             print(hid.decode_interrupt(report_id, direction, buf[1:]))
+        if count > 0:
+            count -= 1
 
 def get_hid_desc(fd=-1, cached=True):
     desc = array.array('B')
@@ -214,12 +237,19 @@ def get_hid_desc(fd=-1, cached=True):
     return hid
 
 def usage():
-    print(f"USAGE: {sys.argv[0]} <list|decode-raw <report-id> [data]|send-raw <report-id> [data]|listen>\n\n"
+    print(f"USAGE: {sys.argv[0]} <list|decode-raw <sequence>|send-raw <sequence>|listen>\n\n"
            "list - Get a list of reports, also update report cache.\n"
-           "decode-raw - Decode a report given on the command-line.\n"
-           "send-raw - Send a report given on the command-line and start listening.\n"
-           "listen - Just listen.\n\n"
-           "A report is given as a decimal report ID followed by hex octets or bits given as # for 1 and . for 0")
+           "decode-raw - Decode a sequence given on the command-line.\n"
+           "send-raw - Send a sequence given on the command-line.\n"
+           "listen - Just listen forever.\n\n"
+           "A sequence is one or a series of output reports.\n"
+           "A single report may be given and the default will just be to send the report and listen forever.\n"
+           "A report is given as a decimal report ID followed by any combination of hex octets or bits given as # for 1 and . for 0.\n"
+           "Reports are separated by an x which may be paired with a number like x5, "
+           "which is the number of packets to listen for before continuing.\n"
+           "If there is no number, it's assumed to be a 0, which will not listen and just continue on sending the next packet.\n"
+           "A negative value can be given to listen forever, but this isn't useful as it can just be left off at the end of the "
+           "sequence to indicate listening forever.\n")
 
 if __name__ == '__main__':
     if len(sys.argv) > 1:
@@ -244,16 +274,17 @@ if __name__ == '__main__':
                         hid = get_hid_desc(fd)
 
                 reports = hid.get_reports(Endpoint.ADDRESS_DIR_OUT)
-                report_id = int(sys.argv[2])
-                if report_id not in reports:
-                    print(f"{report_id} isn't a valid report ID, valid options are:", end='')
-                    for report_id in reports.keys():
-                        print(f" {report_id}", end='')
-                    print()
-                else:
-                    buf = generate_report(reports, report_id, sys.argv[3:])
 
-                    print(hid.decode_interrupt(buf[0], Endpoint.ADDRESS_DIR_OUT, buf[1:]))
+                bufs = generate_reports(reports, sys.argv[2:])
+
+                for buf in bufs:
+                    print(hid.decode_interrupt(buf[0][0], Endpoint.ADDRESS_DIR_OUT, buf[0][1:]))
+                    if buf[1] < 0:
+                        print("Listen forever")
+                    elif buf[1] == 0:
+                        print("Don't listen")
+                    else:
+                        print(f"Listen for {buf[1]} packets")
             else:
                 usage()
         elif sys.argv[1] == "listen":
@@ -272,20 +303,14 @@ if __name__ == '__main__':
                     in_reports = hid.get_reports(Endpoint.ADDRESS_DIR_IN)
                     out_reports = hid.get_reports(Endpoint.ADDRESS_DIR_OUT)
 
-                    report_id = int(sys.argv[2])
-                    if report_id not in out_reports:
-                        print(f"{report_id} isn't a valid report ID, valid options are:", end='')
-                        for report_id in out_reports.keys():
-                            print(f" {report_id}", end='')
-                        print()
-                    else:
-                        buf = generate_report(out_reports, report_id, sys.argv[3:])
+                    bufs = generate_reports(out_reports, sys.argv[2:])
 
-                        print(hid.decode_interrupt(buf[0], Endpoint.ADDRESS_DIR_OUT, buf[1:]))
+                    for buf in bufs:
+                        print(hid.decode_interrupt(buf[0][0], Endpoint.ADDRESS_DIR_OUT, buf[0][1:]))
 
-                        os.write(fd, buf)
+                        os.write(fd, buf[0])
 
-                        listen(fd, hid, in_reports, out_reports)
+                        listen(fd, hid, in_reports, out_reports, buf[1])
             else:
                 usage()
         else:
