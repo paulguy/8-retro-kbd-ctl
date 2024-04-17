@@ -158,31 +158,35 @@ def get_largest_report(reports):
             largest = size
     return largest
 
+def generate_report(reports, report_id, data):
+    # convert to bytes and add 1 for report ID
+    try:
+        bufsize = bits_to_bytes(reports[report_id].get_size()) + 1
+    except KeyError:
+        raise IndexError(f"Invalid report ID {report_id}, see list command for output reports.")
+
+    buf = array.array('B', (report_id,))
+
+    buf.extend(data)
+    if len(buf) < bufsize:
+        buf.extend(itertools.repeat(0, bufsize - len(buf)))
+
+    return buf
+
 def generate_reports(reports, args):
     bufs = []
     pos = 0
     while pos < len(args):
         report_id = int(args[pos])
 
-        # convert to bytes and add 1 for report ID
-        try:
-            bufsize = bits_to_bytes(reports[report_id].get_size()) + 1
-        except KeyError:
-            raise IndexError(f"Invalid report ID {report_id}, see list command for output reports.")
-
-        buf = array.array('B', (report_id,))
-
         num, vals, count = decode_args(args[pos+1:])
         pos += num + 1
 
-        buf.extend(vals)
-        if len(buf) < bufsize:
-            buf.extend(itertools.repeat(0, bufsize - len(buf)))
-        bufs.append((buf, count))
+        bufs.append((generate_report(reports, report_id, vals), count))
 
     return bufs
 
-def listen(fd, hid, in_reports, out_reports, count=-1):
+def listen(fd, hid, in_reports, out_reports, count=-1, callback=None, cb_data=None):
     largest = get_largest_report(in_reports)
     out_largest = get_largest_report(out_reports)
     if out_largest > largest:
@@ -203,7 +207,10 @@ def listen(fd, hid, in_reports, out_reports, count=-1):
             direction = Endpoint.ADDRESS_DIR_OUT
             if report_id in in_reports:
                 direction = Endpoint.ADDRESS_DIR_IN
-            print(hid.decode_interrupt(report_id, direction, buf[1:]))
+            if callback is None:
+                print(hid.decode_interrupt(report_id, direction, buf[1:]))
+            else:
+                callback(cb_data, report_id, direction, buf[1:])
         if count > 0:
             count -= 1
 

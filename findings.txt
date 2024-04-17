@@ -51,3 +51,4 @@ Usually follows a 76 ff, also have seen 78 with 00, 02 and 04
 64148 157.84 5.9.4 HID Report In 84: ((([E4 08 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00])))
 70936 172.06 5.9.5 HID Report Out 82: ((([FA 03 0C 00 AA 09 71 6C 07 E1 43 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00])))
 70938 172.18 5.9.4 HID Report In 84: ((([E4 08 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00])))
+These are for programming the keyboard, but i have no idea how they work!
