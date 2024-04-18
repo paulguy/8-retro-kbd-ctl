@@ -20,11 +20,41 @@ reports 84/82 "R"/"T" in/out - some kind of raw status and programming?
 seems to start with some kind of request or command with response starting
 with the same byte, but not always
 
+06 - get some numbers?
+
 76 a5 - Enable some kind of raw key matrix mode or something?
 76 ff - Disable?
 
 70 - Set profile name, seems to be followed by a 16 bit length in bytes then
      utf-16 (or ucs2?) data
+
+74 - Assign macro to a key and assign a name?
+
+76 - Set a macro, no idea about format
+
+78 - Set those 3 toggles in the main menu... I don't know yet which is which
+     They appear as a bit of the low 3 bits
+
+FA 03 0C 00 AA 09 71 <some kind of key code> 07 <some other key code> - set
+     key map I don't know what all the extra bytes are about but they seem
+     to always be the same?  00 as the key code unsets, this is used with a
+     macro assigned to a key i guess so it doesn't perform both actions?
+
+80 - Get profile name?
+
+81 - Get list of key maps?
+
+82 - Something about macros?
+
+83 - Get more info on a mapped key?
+
+84 - get Name of something?
+
+85 - get some value, always FF?
+
+88 - Get value of 78
+
+89 - get some unknown info
 
 8A 07 - Something about what keys are pressed related to the "raw mode"?
 
@@ -34,18 +64,9 @@ Observations:
 174 21.29 5.9.4 HID Report In 177: ((([2E 31 2E 30 00 00 00 00 00 01 00 B9 05 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00])))
 Has some version numbers in ASCII along with some other unknown values
 
-176 21.3 5.9.5 HID Report Out 82: ((([85 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00])))
-178 21.3 5.9.4 HID Report In 84: ((([85 FF 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00])))
-
 180 21.31 5.9.5 HID Report Out 82: ((([06 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00])))
 182 21.31 5.9.4 HID Report In 84: ((([06 19 00 C8 2D 00 52 72 01 00 64 01 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00])))
-
-186 28.68 5.9.5 HID Report Out 82: ((([80 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00])))
-190 28.68 5.9.4 HID Report In 84: ((([80 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00])))
-
-2904 46.02 5.9.5 HID Report Out 82: ((([78 01 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00])))
-2906 46.02 5.9.4 HID Report In 84: ((([E4 08 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00])))
-Usually follows a 76 ff, also have seen 78 with 00, 02 and 04
+29 8.79 5.9.4 HID Report In 84: ((([06 19 00 C8 2D 00 52 72 01 00 64 02 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00])))
 
 64146 157.72 5.9.5 HID Report Out 82: ((([FA 03 0C 00 AA 09 71 6D 07 E7 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00])))
 64148 157.84 5.9.4 HID Report In 84: ((([E4 08 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00])))
