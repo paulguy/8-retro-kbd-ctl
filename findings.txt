@@ -1,5 +1,6 @@
 On an invalid packet (or at least wrong report ID?):
 HID Report In 84: ((([E4 09 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00])))
+Have also seen 07 and 0a in second byte while messing around.
 
 Success?
 HID Report In 84: ((([E4 08 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00])))
@@ -32,6 +33,8 @@ with the same byte, but not always
 
 76 - Set a macro, no idea about format
 
+77 - Something about deleting a macro
+
 78 - Set those 3 toggles in the main menu... I don't know yet which is which
      They appear as a bit of the low 3 bits
 
@@ -39,6 +42,7 @@ FA 03 0C 00 AA 09 71 <some kind of key code> 07 <some other key code> - set
      key map I don't know what all the extra bytes are about but they seem
      to always be the same?  00 as the key code unsets, this is used with a
      macro assigned to a key i guess so it doesn't perform both actions?
+     Also, there's a possible 4th byte no idea what that's about.
 
 80 - Get profile name?
 
@@ -54,7 +58,7 @@ FA 03 0C 00 AA 09 71 <some kind of key code> 07 <some other key code> - set
 
 88 - Get value of 78
 
-89 - get some unknown info
+89 - get some unknown value, always 2?
 
 8A 07 - Something about what keys are pressed related to the "raw mode"?
 
@@ -67,9 +71,12 @@ Has some version numbers in ASCII along with some other unknown values
 180 21.31 5.9.5 HID Report Out 82: ((([06 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00])))
 182 21.31 5.9.4 HID Report In 84: ((([06 19 00 C8 2D 00 52 72 01 00 64 01 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00])))
 29 8.79 5.9.4 HID Report In 84: ((([06 19 00 C8 2D 00 52 72 01 00 64 02 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00])))
+"Rr" "q"
 
 64146 157.72 5.9.5 HID Report Out 82: ((([FA 03 0C 00 AA 09 71 6D 07 E7 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00])))
 64148 157.84 5.9.4 HID Report In 84: ((([E4 08 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00])))
 70936 172.06 5.9.5 HID Report Out 82: ((([FA 03 0C 00 AA 09 71 6C 07 E1 43 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00])))
 70938 172.18 5.9.4 HID Report In 84: ((([E4 08 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00])))
 These are for programming the keyboard, but i have no idea how they work!
+
+23572 91.79 5.9.5 HID Report Out 82: ((([77 6C C8 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00])))
