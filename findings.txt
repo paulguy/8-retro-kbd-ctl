@@ -38,11 +38,14 @@ with the same byte, but not always
 78 - Set those 3 toggles in the main menu... I don't know yet which is which
      They appear as a bit of the low 3 bits
 
-FA 03 0C 00 AA 09 71 <some kind of key code> 07 <some other key code> - set
+FA 03 0C 00 AA 09 71 <internal scan code> <type> ... - set
      key map I don't know what all the extra bytes are about but they seem
      to always be the same?  00 as the key code unsets, this is used with a
      macro assigned to a key i guess so it doesn't perform both actions?
      Also, there's a possible 4th byte no idea what that's about.
+
+     01 ... - some mouse-related bitfields?
+     07 <modifier?> <key code?> - keyboard event
 
 80 - Get profile name?
 

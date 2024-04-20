@@ -167,7 +167,7 @@ class HIDDEV:
                 if callback is None:
                     print(self.decode(report_id, buf[1:]))
                 else:
-                    if not callback(cb_data, report_id, buf[1:]):
+                    if not callback(self, cb_data, report_id, buf[1:]):
                         return
             if count > 0:
                 count -= 1
