@@ -2,20 +2,14 @@
 
 import array
 
+from lib.hiddev import HIDDEV
 from lib.util import BIT_MASKS
-
-# shenanigans
-send_cmd = __import__("send-cmd", fromlist=('VENDOR_ID', 'PRODUCT_ID', 'INTERFACE_NUM'))
-globals().update(vars(send_cmd))
-
-OUT_ID = 82
-IN_ID = 84
-CMD_ENABLE_KEYMAP = (0x76, 0xa5)
-CMD_DISABLE_KEYMAP = (0x76, 0xff)
+from lib.eightkbd import VENDOR_ID, PRODUCT_ID, INTERFACE_NUM, OUT_ID, IN_ID, CMD_ENABLE_KEYMAP, CMD_DISABLE_KEYMAP
 
 def listen_callback(hid, last_report, report_id, data):
+    print(hid.decode(report_id, data))
+
     if last_report[0] != (report_id, data):
-        print(hid.decode(report_id, data))
         for num, byte in enumerate(data[3:]):
             for bit in range(8):
                 if byte & BIT_MASKS[bit]:

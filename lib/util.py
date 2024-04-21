@@ -57,3 +57,13 @@ def ts_to_sec(sec, usec, precision=2):
     decimal = usec // int(10**(MICROSECOND_EXP-precision))
     decimal = float(decimal) / (10**precision)
     return float(sec) + decimal
+
+def arg_to_num(arg):
+    try:
+        num = int(arg)
+    except ValueError:
+        if arg.startswith("0x"):
+            num = int(arg[2:], base=16)
+        else:
+            raise ValueError("Arg is not a number!")
+    return num

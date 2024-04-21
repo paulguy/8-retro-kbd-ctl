@@ -6,10 +6,7 @@ import array
 from lib.usb import Endpoint
 from lib.util import BIT_MASKS
 from lib.hiddev import HIDDEV
-
-VENDOR_ID = "2dc8"
-PRODUCT_ID = "5200"
-INTERFACE_NUM = 2
+from lib.eightkbd import VENDOR_ID, PRODUCT_ID, INTERFACE_NUM
 
 def decode_args(args):
     vals = array.array('B')
