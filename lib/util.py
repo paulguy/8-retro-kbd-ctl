@@ -45,9 +45,6 @@ def str_hex(data):
                 ret += " "
     return ret
 
-def str_endpoint(busnum, devnum, endpoint):
-    return f"{busnum}.{devnum}.{endpoint}"
-
 def bits_to_bytes(bits):
     if bits % 8 > 0:
         bits += 8

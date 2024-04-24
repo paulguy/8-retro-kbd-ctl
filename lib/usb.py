@@ -3,7 +3,7 @@ import struct
 import errno
 import array
 
-from .util import chrbyte, strbcd, str_hex, str_endpoint, SHIFT_MASKS_LOW, SHIFT_MASKS_HIGH, BIT_MASKS, MICROSECOND
+from .util import chrbyte, strbcd, str_hex, SHIFT_MASKS_LOW, SHIFT_MASKS_HIGH, BIT_MASKS, MICROSECOND
 
 class UninterpretableDataException(Exception):
     pass
@@ -1393,7 +1393,7 @@ class URB:
         return self.epnum & self.ENDPOINT_MASK
 
     def str_endpoint(self):
-        return str_endpoint(self.busnum, self.devnum, self.endpoint())
+        return f"{self.busnum}.{self.devnum}.{self.endpoint()}"
 
     def field_decode(self):
         urb_type_str = "Unknown"

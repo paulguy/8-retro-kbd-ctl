@@ -23,15 +23,23 @@ with the same byte, but not always
 
 06 - get some numbers?
 
-76 a5 - Enable some kind of raw key matrix mode or something?
-76 ff - Disable?
-
 70 - Set profile name, seems to be followed by a 16 bit length in bytes then
      utf-16 (or ucs2?) data
 
 74 - Assign macro to a key and assign a name?
 
-76 - Set a macro, no idea about format
+76 - Set a macro, control raw mode readout
+    76 A5 - enable raw mode
+    76 FF - disable raw mode
+    76 <key> <01 - more, 00 - done?> <16 bit offset?> <this length> <data>...
+    within packet:
+        01 <16 bit repeat count> <number of events> <events>...
+        events:
+            0F <16 bit int milliseconds> - delay
+            81 <key> 00 - key press
+            01 <key> 00 - key release
+            83 <key> 00 - modifier press
+            03 <key> 00 - modifier release
 
 77 - Something about deleting a macro
 
@@ -76,10 +84,25 @@ Has some version numbers in ASCII along with some other unknown values
 29 8.79 5.9.4 HID Report In 84: ((([06 19 00 C8 2D 00 52 72 01 00 64 02 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00])))
 "Rr" "q"
 
-64146 157.72 5.9.5 HID Report Out 82: ((([FA 03 0C 00 AA 09 71 6D 07 E7 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00])))
-64148 157.84 5.9.4 HID Report In 84: ((([E4 08 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00])))
-70936 172.06 5.9.5 HID Report Out 82: ((([FA 03 0C 00 AA 09 71 6C 07 E1 43 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00])))
-70938 172.18 5.9.4 HID Report In 84: ((([E4 08 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00])))
-These are for programming the keyboard, but i have no idea how they work!
-
 23572 91.79 5.9.5 HID Report Out 82: ((([77 6C C8 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00])))
+
+15493 55.25 5.10.5 HID Report Out 82: ((([74 14 02 00 00 32 00 00 00 00 00 00 18 4E 2F 08 19 00 00 00 81 14 00 0F 1F 00 81 1A 00 0F 3E 00])))
+15495 55.35 5.10.4 HID Report In 84: ((([E4 08 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00])))
+15497 55.47 5.10.5 HID Report Out 82: ((([76 14 01 00 00 19 01 00 20 08 81 14 00 0F 1F 00 81 1A 00 0F 3E 00 01 14 00 0F 20 00 01 1A 00 00])))
+15499 55.47 5.10.5 HID Report Out 82: ((([76 14 00 19 00 04 0F C8 00 00 81 14 00 0F 1F 00 81 1A 00 0F 3E 00 01 14 00 0F 20 00 01 1A 00 00])))
+15501 55.57 5.10.4 HID Report In 84: ((([E4 08 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00])))
+
+20293 109.14 5.10.5 HID Report Out 82: ((([74 1A 02 00 00 33 00 00 00 00 00 00 18 4E F9 07 39 00 00 00 81 1D 00 0F 3E 00 01 1D 00 0F 9C 00])))
+20295 109.25 5.10.4 HID Report In 84: ((([E4 08 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00])))
+20297 109.36 5.10.5 HID Report Out 82: ((([76 1A 01 00 00 19 01 11 00 14 81 1D 00 0F 3E 00 01 1D 00 0F 9C 00 81 1B 00 0F 3F 00 01 1B 00 00])))
+20299 109.36 5.10.5 HID Report Out 82: ((([76 1A 01 19 00 18 0F 77 01 81 06 00 0F 5E 00 01 06 00 0F FA 00 81 19 00 0F 5D 00 01 19 00 00 00])))
+20301 109.37 5.10.5 HID Report Out 82: ((([76 1A 00 31 00 10 0F 7D 00 81 05 00 0F 3F 00 01 05 00 0F F4 01 00 19 00 0F 5D 00 01 19 00 00 00])))
+20303 109.47 5.10.4 HID Report In 84: ((([E4 08 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00])))
+
+21839 113.24 5.10.5 HID Report Out 82: ((([74 08 0E 00 00 73 00 61 00 64 00 66 00 61 00 73 00 66 00 00 00 00 00 00 18 4E F9 07 51 00 00 00])))
+21841 113.34 5.10.4 HID Report In 84: ((([E4 08 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00])))
+21843 113.46 5.10.5 HID Report Out 82: ((([76 08 01 00 00 19 01 01 00 1B 81 04 00 0F 3E 00 01 04 00 0F FA 00 81 05 00 0F 3F 00 01 05 00 00])))
+21845 113.46 5.10.5 HID Report Out 82: ((([76 08 01 19 00 18 0F DA 00 81 06 00 0F 5E 00 01 06 00 0F 7D 00 81 07 00 0F 5E 00 01 07 00 00 00])))
+21847 113.46 5.10.5 HID Report Out 82: ((([76 08 01 31 00 18 0F BB 00 81 08 00 0F 20 00 01 08 00 0F 4B 03 83 E1 00 0F F4 01 81 09 00 00 00])))
+21849 113.46 5.10.5 HID Report Out 82: ((([76 08 00 49 00 0C 0F 5E 00 01 09 00 0F 58 01 03 E1 00 0F 4B 03 83 E1 00 0F F4 01 81 09 00 00 00])))
+21851 113.56 5.10.4 HID Report In 84: ((([E4 08 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00])))

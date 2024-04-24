@@ -4,17 +4,15 @@ import array
 
 from lib.hiddev import HIDDEV
 from lib.util import BIT_MASKS
-from lib.eightkbd import VENDOR_ID, PRODUCT_ID, INTERFACE_NUM, OUT_ID, IN_ID, CMD_ENABLE_KEYMAP, CMD_DISABLE_KEYMAP
+from lib.eightkbd import VENDOR_ID, PRODUCT_ID, INTERFACE_NUM, OUT_ID, IN_ID, CMD_ENABLE_KEYMAP, CMD_DISABLE_KEYMAP, get_name_from_bitfield_code
 
 def listen_callback(hid, last_report, report_id, data):
-    print(hid.decode(report_id, data))
-
     if last_report[0] != (report_id, data):
         for num, byte in enumerate(data[3:]):
             for bit in range(8):
                 if byte & BIT_MASKS[bit]:
                     val = (num * 8) + (7 - bit)
-                    print(f" {val}/{val:02X}")
+                    print(f" {val}/{val:02X} {get_name_from_bitfield_code(val)}")
         last_report[0] = (report_id, data)
     return True
 

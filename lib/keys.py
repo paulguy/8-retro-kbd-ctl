@@ -35,97 +35,16 @@ HUT_KEYS = (
     "right-shift", "right-alt", "right-win"
 )
 
-EIGHTKBD_KEY_NAMES = {
-    0x6C: "modifier-a",
-    0x6D: "modifier-b",
-    0x6E: "external-ya",
-    0x6F: "external-yb",
-    0x70: "external-xa",
-    0x71: "external-xb",
-    0x72: "external-ba",
-    0x73: "external-bb",
-    0x74: "external-aa",
-    0x75: "external-ab"
-}
-EIGHTKBD_NAME_KEYS = {}
-def init_name_keys():
-    for key in EIGHTKBD_KEY_NAMES.keys():
-        EIGHTKBD_NAME_KEYS[EIGHTKBD_KEY_NAMES[key]] = key
-
-EIGHTKBD_KEY_VALUES = {
-    # a - z
-    0x04: 0x04, 0x05: 0x05, 0x06: 0x06, 0x07: 0x07, 0x08: 0x08,
-    0x09: 0x09, 0x0A: 0x0A, 0x0B: 0x0B, 0x0C: 0x0C, 0x0D: 0x0D,
-    0x0E: 0x0E, 0x0F: 0x0F, 0x10: 0x10, 0x11: 0x11, 0x12: 0x12,
-    0x13: 0x13, 0x14: 0x14, 0x15: 0x15, 0x16: 0x16, 0x17: 0x17,
-    0x18: 0x18, 0x19: 0x19, 0x1A: 0x1A, 0x1B: 0x1B, 0x1C: 0x1C,
-    0x1D: 0x1D,
-    # 0 - 9
-    0x1E: 0x1E, 0x1F: 0x1F, 0x20: 0x20, 0x21: 0x21, 0x22: 0x22,
-    0x23: 0x23, 0x24: 0x24, 0x25: 0x25, 0x26: 0x26, 0x27: 0x27,
-    # the rest
-    0x28: 0x28, 0x29: 0x29, 0x2A: 0x2A, 0x2B: 0x2B, 0x2C: 0x2C,
-    0x2D: 0x2D, 0x2E: 0x2E, 0x2F: 0x2F, 0x30: 0x30, 0x31: 0x31,
-    0x33: 0x33, 0x34: 0x34, 0x35: 0x35, 0x36: 0x36, 0x37: 0x37,
-    0x38: 0x38, 0x39: 0x39, 0x3A: 0x3A, 0x3B: 0x3B, 0x3C: 0x3C,
-    0x3D: 0x3D, 0x3E: 0x3E, 0x3F: 0x3F, 0x40: 0x40, 0x41: 0x41,
-    0x42: 0x42, 0x43: 0x43, 0x44: 0x44, 0x45: 0x45, 0x46: 0x46,
-    0x47: 0x47, 0x48: 0x48, 0x49: 0x49, 0x4A: 0x4A, 0x4B: 0x4B,
-    0x4C: 0x4C, 0x4D: 0x4D, 0x4E: 0x4E, 0x4F: 0x4F, 0x50: 0x50,
-    0x51: 0x51, 0x52: 0x52,
-    # modifiers
-    0x64: 0xE0, 0x65: 0xE1, 0x66: 0xE2, 0x67: 0xE3, 0x68: 0xE4,
-    0x69: 0xE5, 0x6A: 0xE6, 0x6C: 0x00, 0x6D: 0x00,
-    # external keys
-    0x6E: 0x00, 0x6F: 0x00, 0x70: 0x00, 0x71: 0x00, 0x72: 0x00,
-    0x73: 0x00, 0x74: 0x00, 0x75: 0x00
-}
-EIGHTKBD_VALUE_KEYS = {}
-def init_value_keys():
-    for key in EIGHTKBD_KEY_VALUES.keys():
-        if key != 0:
-            EIGHTKBD_VALUE_KEYS[EIGHTKBD_KEY_VALUES[key]] = key
-
-# TODO: complete this list
-KEYS_UNASSIGNABLE = (0x00, 0x01, 0x02, 0x03, 0x78, 0x79, 0x7a, 0x85, 0x86, 0x9e)
-
-# maybe not complete...
-KEYS_MODIFIERS = (0xE0, 0xE1, 0xE2, 0xE3, 0xE4, 0xE5, 0xE6, 0xE7)
-
-DISABLE_NAME = "disabled"
+# these are specific to the 8bitdo but they have to be here.
 KEY_DISABLE = 0
+NO_MODIFIER = 0
+DISABLE_NAME = "disabled"
 
-def get_name_from_key_code(key):
-    code = EIGHTKBD_KEY_VALUES[key]
-    if code == 0:
-        return EIGHTKBD_KEY_NAMES[key]
-    return HUT_KEYS[code]
+def get_is_modifier(code, disablable=False):
+    return (disablable and code == NO_MODIFIER) or \
+           (code >= 0xE0 and code <= 0xE7)
 
-def get_key_code_from_name(name):
-    code = 0
-    try:
-        code = arg_to_num(name)
-    except ValueError:
-        pass
-    if code == 0:
-        try:
-            # try to get the HUT name from the key name
-            code = HUT_KEYS.index(name.lower())
-        except ValueError:
-            if len(EIGHTKBD_NAME_KEYS) == 0:
-                init_name_keys()
-            try:
-                # if not, try to get the name from the keyboard's
-                # custom key names
-                code = EIGHTKBD_NAME_KEYS[name.lower()]
-            except KeyError:
-                raise ValueError(f"No such key {name}.")
-    # see if the key is on the keyboard
-    if code not in EIGHTKBD_KEY_VALUES:
-        raise ValueError(f"Key {name} isn't on this keyboard.")
-    return code
-
-def get_hut_code_from_name(name):
+def get_hut_code_from_name(name, disablable=False):
     code = None
     try:
         code = arg_to_num(name)
@@ -133,15 +52,22 @@ def get_hut_code_from_name(name):
         pass
     if code is not None:
         if code < 0 or code > len(HUT_KEYS):
-            raise ValueError("Numeric value doesn't map to a named key.")
+            raise ValueError(f"Numeric value {code} doesn't map to a named key.")
         else:
             return code
-    if name.lower() == DISABLE_NAME:
+    if disablable and name.lower() == DISABLE_NAME:
         return KEY_DISABLE
     return HUT_KEYS.index(name.lower())
+
+def get_name_from_hut_code(code, disablable=False):
+    if code < 0 or code > len(HUT_KEYS):
+        raise ValueError(f"Numeric value {code} doesn't map to a named key.")
+    if disablable and code == KEY_DISABLE:
+        return DISABLE_NAME
+    return HUT_KEYS[code]
 
 def get_mod_code_from_name(name):
     code = get_hut_code_from_name(name)
     if code not in KEYS_MODIFIERS:
-        raise ValueError("Key is not a modifier.")
+        raise ValueError(f"Key {code} is not a modifier.")
     return code
