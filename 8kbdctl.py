@@ -7,7 +7,7 @@ from enum import IntEnum
 import lib.keys as keys
 from lib.hiddev import HIDDEV
 import lib.eightkbd as eightkbd
-from lib.util import str_hex
+from lib.util import str_hex, bits_to_bytes
 
 def fetch_profile(fd):
     pass
@@ -129,15 +129,17 @@ def try_convert_name(name, bytes_len):
             raise ValueError(f"Couldn't encode name \"{name}\", try to limit it to {bytes_len // 2} characters.")
     return namebytes
 
-def split_macro_data(name, from_key, eventsbuf, packet_len):
-    namebytes = try_convert_name(name, packet_len - 4)
+def split_macro_data(hid, name, from_key, eventsbuf):
+    packet_len = bits_to_bytes(hid.get_reports()[eightkbd.OUT_ID].get_size()) - 1
+
+    namebytes = try_convert_name(name, packet_len - 5)
     buf = array.array('B', (eightkbd.CMD_SET_MACRO_NAME,
                             from_key,
                             len(namebytes) & 0xFF,
                             len(namebytes) >> 8 & 0xFF))
     buf.extend(namebytes)
 
-    bufs = [buf]
+    bufs = [hid.generate_report(eightkbd.OUT_ID, buf)]
 
     pos = 0
     while pos < len(eventsbuf):
@@ -159,7 +161,7 @@ def split_macro_data(name, from_key, eventsbuf, packet_len):
                                 pos >> 8 & 0xFF,
                                 items_len))
         buf.extend(eventsbuf[pos:pos+items_len])
-        bufs.append(buf)
+        bufs.append(hid.generate_report(eightkbd.OUT_ID, buf))
         pos += items_len
     return bufs
 
@@ -218,10 +220,28 @@ if __name__ == '__main__':
                 print(str_event_list(events))
                 buf = generate_macro_data(repeats, events)
                 print("Packets which would be sent:")
-                bufs = split_macro_data(name, from_key, buf, 32)
-                for buf in bufs:
-                    print(str_hex(buf))
-                    print()
+                with HIDDEV(eightkbd.VENDOR_ID, eightkbd.PRODUCT_ID, eightkbd.INTERFACE_NUM, try_no_open=True) as hid:
+                    bufs = split_macro_data(hid, name, from_key, buf)
+                    for buf in bufs:
+                        print(hid.decode(buf[0], buf[1:]))
+        elif sys.argv[1] == 'set-macro':
+            if len(sys.argv) < 8:
+                usage()
+            else:
+                name = sys.argv[2]
+                from_key = eightkbd.get_key_code_from_name(sys.argv[3])
+                repeats = int(sys.argv[4])
+                events = parse_macro_args(sys.argv[5:])
+                buf = generate_macro_data(repeats, events)
+                with HIDDEV(eightkbd.VENDOR_ID, eightkbd.PRODUCT_ID, eightkbd.INTERFACE_NUM) as hid:
+                    bufs = split_macro_data(hid, name, from_key, buf)
+                    for buf in bufs:
+                        print(hid.decode(buf[0], buf[1:]))
+                        hid.write(buf)
+                    success = [False]
+                    hid.listen(-1, listen_response, success)
+                    if not success[0]:
+                        print("Device returned non-success.")
         elif sys.argv[1] == 'set-all-default':
             with HIDDEV(eightkbd.VENDOR_ID, eightkbd.PRODUCT_ID, eightkbd.INTERFACE_NUM) as hid:
                 success = [False]

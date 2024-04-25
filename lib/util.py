@@ -24,7 +24,7 @@ def str_hex(data):
                f"{chrbyte(data[i+4])}{chrbyte(data[i+5])}{chrbyte(data[i+6])}{chrbyte(data[i+7])}" \
                f" {chrbyte(data[i+8])}{chrbyte(data[i+9])}{chrbyte(data[i+10])}{chrbyte(data[i+11])}" \
                f"{chrbyte(data[i+12])}{chrbyte(data[i+13])}{chrbyte(data[i+14])}{chrbyte(data[i+15])}"
-        if i+16 <= len(data):
+        if i+16 < len(data):
             ret += "\n"
     if len(data) % 16 != 0:
         ret += " "

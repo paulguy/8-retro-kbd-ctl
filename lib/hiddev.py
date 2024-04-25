@@ -64,6 +64,8 @@ def HIDIOCGOUTPUT(length):
     return _IOC(ioctl_opt.IRC_READ, ord('H'), 0x0C, length)
 
 def find_hidraw_by_ids(udev, vendor, product, interface):
+    vendor = f"{vendor:04x}"
+    product = f"{product:04x}"
     for device in udev.list_devices(subsystem='hidraw'):
         # up from hidraw to hid-generic, usb_interface up to usb_device
         usbdev = device.parent.parent.parent
@@ -78,6 +80,9 @@ def find_hidraw_by_ids(udev, vendor, product, interface):
             if int(usbinterface[index:]) == interface:
                 return device
     return None
+
+def generate_filename(vendor_id, product_id, interface_num):
+    return f"{vendor_id:04x}_{product_id:04x}_{interface_num}.bin"
 
 class HIDDEV:
     def raise_report_id_exception(report_id, direction=None):
@@ -105,10 +110,11 @@ class HIDDEV:
     def get_hid_desc(self, cached):
         desc = array.array('B')
         fromfile = False
+        filename = generate_filename(self.vendor_id, self.product_id, self.interface_num)
 
         if cached:
             try:
-                with open("hid_desc.bin", "rb") as descfile:
+                with open(filename, "rb") as descfile:
                     descfile.seek(0, os.SEEK_END)
                     size = descfile.tell()
                     descfile.seek(0, os.SEEK_SET)
@@ -123,7 +129,7 @@ class HIDDEV:
             return
 
         if not fromfile:
-            with open("hid_desc.bin", "wb") as descfile:
+            with open(filename, "wb") as descfile:
                 desc.tofile(descfile)
 
         self.hid.decode_desc(desc)
@@ -191,6 +197,9 @@ class HIDDEV:
 
     def __init__(self, vendor_id, product_id, interface_num, force_no_cache=False, try_no_open=False):
         self.fd = None
+        self.vendor_id = vendor_id
+        self.product_id = product_id
+        self.interface_num = interface_num
         self.hid = HID()
 
         self.have_desc = False

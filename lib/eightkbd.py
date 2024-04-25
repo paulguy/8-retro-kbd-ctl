@@ -1,8 +1,8 @@
 from .keys import get_hut_code_from_name, get_name_from_hut_code, KEY_DISABLE, DISABLE_NAME
 from .util import arg_to_num
 
-VENDOR_ID = "2dc8"
-PRODUCT_ID = "5200"
+VENDOR_ID = 0x2dc8
+PRODUCT_ID = 0x5200
 INTERFACE_NUM = 2
 
 OUT_ID = 82
