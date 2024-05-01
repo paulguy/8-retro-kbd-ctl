@@ -1,3 +1,5 @@
+import array
+
 from .keys import get_hut_code_from_name, get_name_from_hut_code, KEY_DISABLE, DISABLE_NAME
 from .util import arg_to_num
 
@@ -20,14 +22,23 @@ SET_TYPE_KBD = 7
 
 CMD_SET_MACRO_NAME = 0x74
 CMD_SET_MACRO = 0x76
-CMD_SET_MACRO_CONST = 0x01
+CMD_MACRO_CONST = 0x01
+CMD_MACRO_MORE = 0x01
+CMD_MACRO_MORE_POS = 2
+
+CMD_GET_NAME = 0x80
+CMD_GET_KEYS = 0x81
+CMD_GET_MACROS = 0x82
+CMD_GET_KEY = 0x83
+CMD_GET_MACRO_NAME = 0x84
+CMD_GET_MACRO = 0x86
 
 RESPONSE_CODE = 0xE4
 RESPONSE_SUCCESS = 0x08
 
 KEY_NAMES = {
-    0x6C: "modifier-a",
-    0x6D: "modifier-b",
+    0x6C: "modifier-b",
+    0x6D: "modifier-a",
     0x6E: "external-ya",
     0x6F: "external-yb",
     0x70: "external-xa",
@@ -126,3 +137,46 @@ def get_key_code_from_name(name):
     if code not in KEY_VALUES:
         raise ValueError(f"Key {name} isn't on this keyboard.")
     return code
+
+def try_encode_name(name, bytes_len):
+    # encode the string and chop it to fit
+    namebytes = name.encode(NAME_ENCODING)[:bytes_len]
+    try:
+        # try to see if this works
+        namebytes.decode(NAME_ENCODING)
+    except UnicodeDecodeError:
+        # try to cut off another byte...
+        namebytes = namebytes[:-1]
+        try:
+            namebytes.decode(NAME_ENCODING)
+        except UnicodeDecodeError:
+            raise ValueError(f"Couldn't encode name \"{name}\", try to limit it to {bytes_len // 2} characters.")
+
+    namebytes = array.array('B', namebytes)
+
+    # swap bytes for spaces, needed otherwise they return corrupt
+    for i in range(0, len(namebytes)-1, 2):
+        if namebytes[i] == 0x00 and namebytes[i+1] == 0x20:
+            namebytes[i] = 0x20
+            namebytes[i+1] = 0x00
+
+    # trailing 0 is cut off
+    if namebytes[-1] == 0:
+        namebytes = namebytes[:-1]
+
+    return namebytes
+
+def decode_name(name):
+    namebytes = array.array('B', name)
+
+    # reattach cut off trailing 0
+    if len(namebytes) % 2 == 1:
+        namebytes.append(0)
+
+    # swap bytes back
+    for i in range(0, len(namebytes)-1, 2):
+        if namebytes[i] == 0x20 and namebytes[i+1] == 0x00:
+            namebytes[i] = 0x00
+            namebytes[i+1] = 0x20
+
+    return namebytes.tobytes().decode(NAME_ENCODING)

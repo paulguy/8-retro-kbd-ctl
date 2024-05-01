@@ -85,14 +85,14 @@ def generate_filename(vendor_id, product_id, interface_num):
     return f"{vendor_id:04x}_{product_id:04x}_{interface_num}.bin"
 
 class HIDDEV:
-    def raise_report_id_exception(report_id, direction=None):
+    def raise_report_id_exception(self, report_id, direction=None):
         reports = self.all_reports
         if direction == Endpoint.ADDRESS_DIR_OUT:
             reports = self.out_reports
         if direction == Endpoint.ADDRESS_DIR_IN:
             reports = self.in_reports
         liststr = ""
-        for report in reports.keys:
+        for report in sorted(reports.keys()):
             liststr += f" {report}"
 
         raise IndexError(f"Invalid report ID {report_id}, see list command for output reports. Valid options: {liststr}")
@@ -150,8 +150,8 @@ class HIDDEV:
 
         return buf
 
-    def select(self):
-        return len(select.select((self.fd,), (), (), 1)[0]) > 0
+    def select(self, timeout):
+        return len(select.select((self.fd,), (), (), timeout)[0]) > 0
 
     def read(self):
         size = os.readv(self.fd, (self.largest_buf,))
@@ -160,23 +160,25 @@ class HIDDEV:
     def write(self, buf):
         return os.write(self.fd, buf)
 
-    def listen(self, count=-1, callback=None, cb_data=None):
+    def listen(self, count=-1, callback=None, cb_data=None, timeout=None):
         while count != 0:
-            self.select()
-            buf = ""
             try:
-                buf = self.read()
-            except BlockingIOError:
-                pass
+                if not self.select(timeout):
+                    return False
+            except KeyboardInterrupt:
+                return False
+            buf = self.read()
             if len(buf) > 0:
                 report_id = buf[0]
                 if callback is None:
                     print(self.decode(report_id, buf[1:]))
                 else:
                     if not callback(self, cb_data, report_id, buf[1:]):
-                        return
+                        break
             if count > 0:
                 count -= 1
+
+        return True
 
     def get_reports(self, direction=None):
         if direction == Endpoint.ADDRESS_DIR_OUT:

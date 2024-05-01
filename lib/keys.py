@@ -57,7 +57,10 @@ def get_hut_code_from_name(name, disablable=False):
             return code
     if disablable and name.lower() == DISABLE_NAME:
         return KEY_DISABLE
-    return HUT_KEYS.index(name.lower())
+    try:
+        return HUT_KEYS.index(name.lower())
+    except ValueError:
+        raise ValueError(f"\"{name}\" is not a known key name.")
 
 def get_name_from_hut_code(code, disablable=False):
     if code < 0 or code > len(HUT_KEYS):
