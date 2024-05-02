@@ -1,13 +1,23 @@
 #!/usr/bin/env python
 
+# TODO:
+# Serialize/deseralize profiles (probably JSON)
+# Send profile to device
+# Record macros
+
+# reorganizational TODOs:
+# move general keyboard stuff to eightkbd.py
+# change some structures in to actual structs
+
 import sys
 import array
-from enum import IntEnum
 import itertools
+import struct
 
 import lib.keys as keys
 from lib.hiddev import HIDDEV
 import lib.eightkbd as eightkbd
+MacroEventAction = eightkbd.MacroEventAction
 from lib.util import str_hex, bits_to_bytes
 
 KBD_TIMEOUT=5
@@ -65,13 +75,6 @@ def assemble_set_key(hid, from_key, to_key, mod_key):
 
     return hid.generate_report(eightkbd.OUT_ID, buf)
 
-class MacroEventAction(IntEnum):
-    DELAY = 0x0F
-    PRESSED = 0x81
-    RELEASED = 0x01
-    MOD_PRESSED = 0x83
-    MOD_RELEASED = 0x03
-
 def parse_macro_args(args):
     events = []
     for i in range(0, len(args), 3):
@@ -104,17 +107,15 @@ def str_event_list(events):
     for num, event in enumerate(events):
         match event[0]:
             case MacroEventAction.DELAY:
-                ret += f"Delay: {event[1]} ms"
+                ret += f"Delay: {event[1]} ms\n"
             case MacroEventAction.PRESSED:
-                ret += f"Press: {keys.get_name_from_hut_code(event[1])}"
+                ret += f"Press: {keys.get_name_from_hut_code(event[1])}\n"
             case MacroEventAction.RELEASED:
-                ret += f"Release: {keys.get_name_from_hut_code(event[1])}"
+                ret += f"Release: {keys.get_name_from_hut_code(event[1])}\n"
             case MacroEventAction.MOD_PRESSED:
-                ret += f"Modifier Press: {keys.get_name_from_hut_code(event[1])}"
+                ret += f"Modifier Press: {keys.get_name_from_hut_code(event[1])}\n"
             case MacroEventAction.MOD_RELEASED:
-                ret += f"Modifier Release: {keys.get_name_from_hut_code(event[1])}"
-        if num < len(events) - 1:
-            ret += ", "
+                ret += f"Modifier Release: {keys.get_name_from_hut_code(event[1])}\n"
     return ret
 
 def generate_macro_data(repeats, events):
@@ -173,6 +174,59 @@ def split_macro_data(hid, name, from_key, eventsbuf):
         pos += items_len
     return namebuf, bufs
 
+MACRO_PKT_HDR = struct.Struct("<BBBHB")
+MACRO_HDR = struct.Struct("<BHB")
+MACRO_EVENT = struct.Struct("<BH")
+
+def decode_macro_data(macrobuf):
+    _, repeats, count = MACRO_HDR.unpack(macrobuf[:MACRO_HDR.size])
+
+    events = []
+    for pos in range(MACRO_HDR.size,
+                     MACRO_HDR.size+(count*MACRO_EVENT.size),
+                     MACRO_EVENT.size):
+        events.append(MACRO_EVENT.unpack(macrobuf[pos:pos+MACRO_EVENT.size]))
+
+    return repeats, events
+
+class KeyboardMacro:
+    def __init__(self, name : str, repeats : int):
+        self.name = name
+        self.repeats = repeats
+        self.event = []
+
+    def add_event(self, event, arg):
+        match event:
+            case MacroEventAction.DELAY:
+                if arg < 0 or arg > 65535:
+                    raise ValueError("Delay value {arg} out of range!")
+                self.event.append((event, arg))
+            case MacroEventAction.PRESSED:
+                if arg < 0 or arg > 255:
+                    raise ValueError("Key value {arg} out of range!")
+                self.event.append((event, arg))
+            case MacroEventAction.RELEASED:
+                if arg < 0 or arg > 255:
+                    raise ValueError("Key value {arg} out of range!")
+                self.event.append((event, arg))
+            case MacroEventAction.MOD_PRESSED:
+                if arg < 0 or arg > 255:
+                    raise ValueError("Key value {arg} out of range!")
+                self.event.append((event, arg))
+            case MacroEventAction.MOD_RELEASED:
+                if arg < 0 or arg > 255:
+                    raise ValueError("Key value {arg} out of range!")
+                self.event.append((event, arg))
+            case _:
+                raise ValueError("Unsupported event {event}!")
+
+    def add_events(self, events):
+        for event in events:
+            self.add_event(event[0], event[1])
+
+    def __str__(self):
+        return f"Name: {self.name}\nRepeats: {self.repeats}\nEvents:\n{str_event_list(self.event)}"
+
 class KeyboardProfile:
     def __init__(self, name : str):
         self.name = name
@@ -182,13 +236,15 @@ class KeyboardProfile:
     def set_key(self, key : int, mapping : KeyMapping):
         self.keys[key] = mapping
 
-    def set_macro(self, key : int, macro):
+    def set_macro(self, key : int, macro : KeyboardMacro):
         self.macros[key] = macro
 
     def __str__(self):
         ret = f"Profile Name: {self.name}\n"
         for key in self.keys.keys():
             ret += f"{eightkbd.get_name_from_key_code(key)}: {self.keys[key]}\n"
+        for macro in self.macros.keys():
+            ret += f"Key: {macro}\n{self.macros[macro]}"
         return ret
 
 def get_data_once(hid, data_return, report_id, data):
@@ -214,7 +270,11 @@ def get_data_macrolist(hid, data_return, report_id, data):
     print(hid.decode(report_id, data))
 
     if report_id == eightkbd.IN_ID:
-        data_return.append(data)
+        _, _, _, pos, size = MACRO_PKT_HDR.unpack(data[0:MACRO_PKT_HDR.size])
+        if len(data_return) == pos:
+            data_return.extend(data[MACRO_PKT_HDR.size:MACRO_PKT_HDR.size+size])
+        else:
+            raise ValueError("Only support appending macro data buffers!")
         if data[eightkbd.CMD_MACRO_MORE_POS] == 0:
             return False
 
@@ -294,7 +354,7 @@ def get_profile(hid):
     # get macro names
     buf[0] = eightkbd.CMD_GET_MACRO_NAME
 
-    macronames = []
+    macronames = {}
 
     for macro in macros:
         buf[1] = macro
@@ -309,7 +369,25 @@ def get_profile(hid):
             raise ValueError(f"Got macro for key {data_return[0][1]} instead of {macro}?")
 
         str_size = data_return[0][2] | (data_return[0][3] << 8)
-        macronames.append(eightkbd.decode_name(data_return[0][4:4+str_size]))
+        macronames[macro] = eightkbd.decode_name(data_return[0][4:4+str_size])
+
+    # get macro definitions
+    buf[0] = eightkbd.CMD_GET_MACRO
+
+    for macro in macros:
+        buf[1] = macro
+        print(hid.decode(eightkbd.OUT_ID, buf))
+        hid.write(hid.generate_report(eightkbd.OUT_ID, buf))
+
+        data_return = array.array('B')
+        if not hid.listen(-1, get_data_macrolist, data_return, KBD_TIMEOUT):
+            raise RuntimeError("Failed to get macro definition from device.")
+
+        repeats, events = decode_macro_data(data_return)
+        macro_obj = KeyboardMacro(macronames[macro], repeats)
+        macro_obj.add_events(events)
+
+        profile.set_macro(macro, macro_obj)
 
     return profile
 
@@ -382,7 +460,8 @@ def main(args):
                 buf = generate_macro_data(repeats, events)
                 print("Packets which would be sent:")
                 with HIDDEV(eightkbd.VENDOR_ID, eightkbd.PRODUCT_ID, eightkbd.INTERFACE_NUM, try_no_open=True) as hid:
-                    bufs = split_macro_data(hid, name, from_key, buf)
+                    namebuf, bufs = split_macro_data(hid, name, from_key, buf)
+                    print(hid.decode(namebuf[0], namebuf[1:]))
                     for buf in bufs:
                         print(hid.decode(buf[0], buf[1:]))
         elif args[1] == 'set-macro':

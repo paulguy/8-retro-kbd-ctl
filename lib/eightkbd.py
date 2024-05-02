@@ -1,4 +1,5 @@
 import array
+from enum import IntEnum
 
 from .keys import get_hut_code_from_name, get_name_from_hut_code, KEY_DISABLE, DISABLE_NAME
 from .util import arg_to_num
@@ -13,6 +14,9 @@ IN_ID = 84
 # this might be wrong but matches what it looks like...
 # otherwise, there's a 0 padding.
 NAME_ENCODING = 'utf-16-be'
+
+RESPONSE_CODE = 0xE4
+RESPONSE_SUCCESS = 0x08
 
 CMD_ENABLE_KEYMAP = (0x76, 0xa5)
 CMD_DISABLE_KEYMAP = (0x76, 0xff)
@@ -33,8 +37,12 @@ CMD_GET_KEY = 0x83
 CMD_GET_MACRO_NAME = 0x84
 CMD_GET_MACRO = 0x86
 
-RESPONSE_CODE = 0xE4
-RESPONSE_SUCCESS = 0x08
+class MacroEventAction(IntEnum):
+    DELAY = 0x0F
+    PRESSED = 0x81
+    RELEASED = 0x01
+    MOD_PRESSED = 0x83
+    MOD_RELEASED = 0x03
 
 KEY_NAMES = {
     0x6C: "modifier-b",
