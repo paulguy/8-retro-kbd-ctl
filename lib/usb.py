@@ -624,7 +624,7 @@ class HID:
 
         return value
 
-    def process_collection(data, report_id, direction, collection, bytepos, bitpos):
+    def process_collection(data, report_id, direction, collection, bytepos=0, bitpos=0):
         ret = "("
         for num, report in enumerate(collection):
             if isinstance(report, HIDCollection):
@@ -674,7 +674,7 @@ class HID:
 
     def decode_interrupt(self, report_id, direction, data):
         try:
-            ret = HID.process_collection(data, report_id, direction, self.descriptors, 0, 0)
+            ret = HID.process_collection(data, report_id, direction, self.descriptors)
         except IndexError:
             return f"Malformed packet!"
         if ret is not None:

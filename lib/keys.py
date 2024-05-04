@@ -71,6 +71,6 @@ def get_name_from_hut_code(code, disablable=False):
 
 def get_mod_code_from_name(name):
     code = get_hut_code_from_name(name)
-    if code not in KEYS_MODIFIERS:
+    if not get_is_modifier(code):
         raise ValueError(f"Key {code} is not a modifier.")
     return code

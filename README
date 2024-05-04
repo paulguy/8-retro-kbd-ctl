@@ -1,0 +1,37 @@
+Dependencies:
+Tested on Python 3.11.8, but the most advanced feature used is probably match.
+pcapng (only for scan-usb-hid.py)
+pyudev
+ioctl-opt
+
+Using it:
+
+USAGE: ./8kbdctl.py [test|force|verbose]... <<command> [args]>...
+
+test - Just go through the motions but do everything except actually updating
+       the device.  The device will still be accessed to get the profile.
+force - Don't get the profile from the device, making all changes happen
+        even if they would be redundant.
+verbose - Get a lot of extra information about what's happening.
+
+Command may be:
+list-in-codes - List possible codes which relate to keys on the keyboard and
+    their names.
+list-out-codes - List possible codes which a key may be assigned to and their
+    names.
+get-profile - Get the profile from the device.
+set-name <name> - Set the profile name, as a quirk of the device, setting
+    the name to an empty string ("") will disable the profile button.
+set-key [<mod-key>+]<in-key> <out-key> - Set a mapping from in-key to
+    out-key, with optional mod-key to be pressed at the same time.
+set-macro <in-key> <name> <repeats> [events] - Set a macro to <in-key>.
+    <repeats> may be 0 to disable a macro, name and any events will be
+    accepted, but ignored, except end.
+    For each event: up|down <out-key/mod-key> <delay in milliseconds>
+                    - or -
+                    end
+down - Indicate a key press.
+up - Indicate a key release.
+end - Indicate the end of a macro, this is optional but necessary if
+      additional commands are to follow.
+set-all-default - Restore all keys to defaults.
