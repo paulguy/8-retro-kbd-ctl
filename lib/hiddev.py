@@ -4,13 +4,17 @@ import fcntl
 import ctypes
 import array
 import itertools
+import pathlib
 
 import pyudev
 from ioctl_opt import IOR as _IOR
 from ioctl_opt import IOC as _IOC
+from xdg_base_dirs import xdg_cache_home
 
 from .usb import HID, Endpoint
 from .util import bits_to_bytes
+
+XDG_APPLICATION_NAME = "8kbdctl"
 
 # include/linux/hid.h
 HID_MAX_DESCRIPTOR_SIZE = 4096
@@ -84,6 +88,18 @@ def find_hidraw_by_ids(udev, vendor, product, interface):
 def generate_filename(vendor_id, product_id, interface_num):
     return f"{vendor_id:04x}_{product_id:04x}_{interface_num}.bin"
 
+def get_xdg_cache_dir(appname=XDG_APPLICATION_NAME):
+    cachedir = xdg_cache_home().joinpath(pathlib.PurePath(appname))
+    # make sure it exists
+    try:
+        cachedir.mkdir(parents=True, exist_ok=True)
+    except Exception as e:
+        print("WARNING: Failed to create XDG cache dir {str(cachedir)}.")
+        print(e)
+        print("Not using HID report caching, will fetch from device.")
+        return None
+    return cachedir
+
 class HIDDEV:
     def raise_report_id_exception(self, report_id, direction=None):
         reports = self.all_reports
@@ -111,10 +127,13 @@ class HIDDEV:
         desc = array.array('B')
         fromfile = False
         filename = generate_filename(self.vendor_id, self.product_id, self.interface_num)
+        cache_dir = get_xdg_cache_dir()
+        if cache_dir is not None:
+            filename = cache_dir.joinpath(pathlib.PurePath(filename))
 
-        if cached:
+        if cache_dir is not None and cached:
             try:
-                with open(filename, "rb") as descfile:
+                with filename.open("rb") as descfile:
                     descfile.seek(0, os.SEEK_END)
                     size = descfile.tell()
                     descfile.seek(0, os.SEEK_SET)
@@ -128,8 +147,8 @@ class HIDDEV:
         else:
             return
 
-        if not fromfile:
-            with open(filename, "wb") as descfile:
+        if not fromfile and cache_dir is not None:
+            with filename.open("wb") as descfile:
                 desc.tofile(descfile)
 
         self.hid.decode_desc(desc)
