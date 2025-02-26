@@ -1,0 +1,30 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "8kbdctl"
+version = "1.0"
+authors = [
+  { name="paulguy", email="author@example.com" },
+]
+description = "Control 8BitDo Retro Keyboard from Linux"
+readme = "README"
+requires-python = ">=3.8"
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Operating System :: POSIX :: Linux",
+    "License :: OSI Approved :: MIT License",
+]
+dependencies = [
+    "pyudev",
+    "ioctl-opt",
+    "xdg-base-dirs"
+]
+
+[project.urls]
+Homepage = "https://github.com/paulguy/8-retro-kbd-ctl"
+Issues = "https://github.com/paulguy/8-retro-kbd-ctl/issues"
+
+[project.scripts]
+8kbdctl = "eightkbdctl.run:run"
