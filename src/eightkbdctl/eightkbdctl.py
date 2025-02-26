@@ -7,9 +7,9 @@
 
 import sys
 
-import lib.keys as keys
-from lib.hiddev import HIDDEV
-import lib.eightkbd as eightkbd
+from .lib import keys
+from .lib.hiddev import HIDDEV
+from .lib import eightkbd
 MacroEventAction = eightkbd.MacroEventAction
 
 def usage(exe):

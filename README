@@ -3,6 +3,7 @@ Tested on Python 3.11.8, but the most advanced feature used is probably match.
 pcapng (only for scan-usb-hid.py)
 pyudev
 ioctl-opt
+xdg-base-dirs
 
 Using it:
 
